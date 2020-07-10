@@ -1,3 +1,13 @@
+#######################################
+### BpodAcademy gitignore
+#######################################
+
+.vscode
+
+#######################################
+### standard python package gitignore
+########################################
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
