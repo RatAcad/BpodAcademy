@@ -122,7 +122,7 @@ class BpodAcademy(Tk):
 
         protocols = self._load_protocols()
 
-        self.cfg = {'ids' : ids, 'ports' : ports, 'protocols' : protocols, 'subjects' : []}
+        self.cfg = {'ids' : ids, 'ports' : ports, 'protocols' : protocols}
 
 
     def _save_config(self):
@@ -157,7 +157,10 @@ class BpodAcademy(Tk):
             log_file = Path(f"{self.log_dir}/{this_bpod}.log")
 
             # remove old log file if it exists
-            log_file.unlink(missing_ok=True)
+            try:
+                log_file.unlink()
+            except FileNotFoundError:
+                pass
 
             # open screen for this bpod
             subprocess.call(["screen", "-dmS", this_bpod, "-L", "-Logfile", log_file])
@@ -165,12 +168,10 @@ class BpodAcademy(Tk):
             # start matlab
             subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", "matlab\n"])
 
-            time.sleep(10)
-
             # start Bpod
             subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", f"Bpod('{this_port}', 0, 0);\n"])
 
-            time.sleep(5)
+            time.sleep(10)
             
             self.bpod_status[index] = 1
             self.box_labels[index]['bg'] = BpodAcademy.READY_COLOR
@@ -256,7 +257,7 @@ class BpodAcademy(Tk):
             subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", "StopProtocol;\n"])
 
             self.bpod_status[index] = 1
-            self.box_labels[index]['bg'] = BpodAcademy.OFF_COLOR
+            self.box_labels[index]['bg'] = BpodAcademy.READY_COLOR
 
 
 
@@ -277,8 +278,6 @@ class BpodAcademy(Tk):
 
             # send command to end bpod
             subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", "EndBpod;\n"])
-
-            time.sleep(5)
 
             # close matlab
             subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", "exit\n"])
@@ -609,6 +608,32 @@ class BpodAcademy(Tk):
         new_settings_window.mainloop()
 
 
+    def _close_bpod_academy(self):
+
+        ### check for running sessions ###
+        if any([status == 2 for status in self.bpod_status]):
+            messagebox.showwarning("Bpod protocol(s) are currently running. Please close open protocols before exiting BpodAcademy.")
+        else:
+            
+            ### ask user to confirm closing ###
+            if messagebox.askokcancel("Close Bpod?", "Are you sure you want to close BpodAcademy? Any open Bpod devices will be closed."):
+                
+                closing_window = Toplevel(self)
+                closing_window.title("Closing Bpods")
+                Label(closing_window, text="Closing open Bpods. Please wait...").pack()
+                closing_window.update()
+
+                ### Close open Bpods ###
+                for i in range(self.n_bpods):
+                    if self.bpod_status[i] > 0:
+                        self._end_bpod(i)
+                
+                closing_window.destroy()
+
+                ### close BpodAcademy ###
+                self.quit()
+
+
     def _create_window(self):
         
         self.title("Bpod Academy")
@@ -652,13 +677,14 @@ class BpodAcademy(Tk):
         Button(self, text='Add Subject', command=self._add_new_subject_window).grid(sticky='nsew', row=5*(rows_per_box+1), column=0)
         Button(self, text='Add Settings', command=self._add_new_settings_window).grid(sticky='nsew', row=5*(rows_per_box+1)+1, column=0)
         Button(self, text='Add Bpod', command=self._add_new_box).grid(sticky='nsew', row=5*(rows_per_box+1)+2, column=0)
-        Button(self, text='Close', command=self.quit).grid(sticky='nsew', row=5*(rows_per_box+1)+2, column=1)
+        Button(self, text='Close', command=self._close_bpod_academy).grid(sticky='nsew', row=5*(rows_per_box+1)+2, column=1)
+        self.protocol("WM_DELETE_WINDOW", self._close_bpod_academy)
+
+
+def main():
+    bpodacademy = BpodAcademy()
+    bpodacademy.mainloop()
 
 
 if __name__ == "__main__":
-    gui = BpodAcademy()
-    gui.mainloop()
-
-
-
-
+    main()
