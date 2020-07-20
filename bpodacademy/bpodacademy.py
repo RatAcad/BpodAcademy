@@ -312,9 +312,7 @@ class BpodAcademy(Tk):
         else:
 
             # send command to stop
-            subprocess.call(
-                ["screen", "-S", this_bpod, "-X", "stuff", "StopProtocol;\n"]
-            )
+            subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", "^C"])
 
             self.bpod_status[index] = 1
             self.box_labels[index]["bg"] = BpodAcademy.READY_COLOR
