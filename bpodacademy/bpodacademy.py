@@ -17,8 +17,10 @@ import shutil
 import subprocess
 import csv
 import serial.tools.list_ports as list_ports
-import time
+import datetime
 from scipy.io import savemat
+import matlab.engine
+import io
 
 
 class BpodAcademy(Tk):
@@ -28,6 +30,8 @@ class BpodAcademy(Tk):
     OFF_COLOR = "light salmon"
     READY_COLOR = "light goldenrod"
     ON_COLOR = "pale green"
+    CHECK_PROTOCOL_MS = 10000
+    SAVE_LOG_MS = 10000
 
     ### Utility functions ###
 
@@ -42,6 +46,12 @@ class BpodAcademy(Tk):
             p[0] for p in all_ports if ("Arduino" in p[1]) or ("Teensy" in p[1])
         ]
         return bpod_ports
+
+    @staticmethod
+    def _get_datetime_string():
+
+        date_time = datetime.datetime.now()
+        return date_time.strftime("%m/%d/%Y %H:%M:%S")
 
     ### Object methods ###
 
@@ -66,6 +76,10 @@ class BpodAcademy(Tk):
         ### create window ###
         self.n_bpods = 0
         self.bpod_status = []
+        self.matlab_engines = []
+        self.protocol_handles = []
+        self.bpod_logs = []
+        self.bpod_log_files = []
         self._create_window()
 
     def _set_bpod_directory(self):
@@ -150,6 +164,28 @@ class BpodAcademy(Tk):
             self.cfg["ports"][i] = self.selected_ports[i].get()
         self._save_config()
 
+    def _write_to_log(self, index, note=""):
+
+        self.bpod_logs[index].write(
+            f"{BpodAcademy._get_datetime_string()}\n{self.cfg['ids'][index]}: {note}\n\n"
+        )
+
+    def _log_to_file(self, index):
+
+        # get log content
+        new_content = self.bpod_logs[index].getvalue()
+
+        # flush contents from log
+        self.bpod_logs[index].truncate(0)
+        self.bpod_logs[index].seek(0)
+
+        # write contents to file
+        self.bpod_log_files[index].write(new_content)
+
+        # run again in SAVE_LOG_MS milliseconds
+        self.after(BpodAcademy.SAVE_LOG_MS, lambda: self._log_to_file(index))
+
+
     def _start_bpod(self, index):
 
         this_bpod = self.cfg["ids"][index]
@@ -169,33 +205,22 @@ class BpodAcademy(Tk):
             wait_dialog.update()
 
             this_port = self.selected_ports[index].get()
-            log_file = Path(f"{self.log_dir}/{this_bpod}.log")
 
-            # remove old log file if it exists
-            try:
-                log_file.unlink()
-            except FileNotFoundError:
-                pass
+            # start matlab engine for this bpod
+            self._write_to_log(index, "starting matlab engine")
+            self.matlab_engines[index] = matlab.engine.start_matlab()
 
-            # open screen for this bpod
-            subprocess.call(["screen", "-dmS", this_bpod, "-L", "-Logfile", log_file])
-
-            # start matlab
-            subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", "matlab\n"])
-
-            # start Bpod
-            subprocess.call(
-                [
-                    "screen",
-                    "-S",
-                    this_bpod,
-                    "-X",
-                    "stuff",
-                    f"Bpod('{this_port}', 0, 0, '{this_bpod}');\n",
-                ]
+            # start bpod
+            self._write_to_log(index, "starting Bpod")
+            self.matlab_engines[index].Bpod(
+                this_port,
+                0,
+                0,
+                this_bpod,
+                nargout=0,
+                stdout=self.bpod_logs[index],
+                stderr=self.bpod_logs[index],
             )
-
-            time.sleep(10)
 
             self.bpod_status[index] = 1
             self.box_labels[index]["bg"] = BpodAcademy.READY_COLOR
@@ -216,8 +241,12 @@ class BpodAcademy(Tk):
         else:
 
             # call switch gui
-            subprocess.call(
-                ["screen", "-S", this_bpod, "-X", "stuff", "BpodSystem.SwitchGUI();\n"]
+            self._write_to_log(index, "switch gui")
+            self.matlab_engines[index].eval(
+                "BpodSystem.SwitchGUI();",
+                nargout=0,
+                stdout=self.bpod_logs[index],
+                stderr=self.bpod_logs[index],
             )
 
             self.switch_gui_buttons[index]["text"] = (
@@ -247,15 +276,12 @@ class BpodAcademy(Tk):
         else:
 
             # call calibration gui
-            subprocess.call(
-                [
-                    "screen",
-                    "-S",
-                    this_bpod,
-                    "-X",
-                    "stuff",
-                    "BpodLiquidCalibration('Calibrate');\n",
-                ]
+            self._write_to_log(index, "calibrate")
+            self.matlab_engines[index].BpodLiquidCalibration(
+                "Calibrate",
+                nargout=0,
+                stdout=self.bod_logs[index],
+                stderr=self.bpod_logs[index],
             )
 
     def _run_bpod_protocol(self, index):
@@ -282,21 +308,73 @@ class BpodAcademy(Tk):
             this_subject = self.selected_subjects[index].get()
             this_settings = self.selected_settings[index].get()
 
-            command = ["screen", "-S", this_bpod, "-X", "stuff"]
-            if this_settings:
-                command += [
-                    f"RunProtocol('StartSafe', '{this_protocol}', '{this_subject}', '{this_settings}');\n"
-                ]
-            else:
-                command += [
-                    f"RunProtocol('StartSafe', '{this_protocol}', '{this_subject}');\n"
-                ]
+            if self.protocol_handles[index] is None:
 
-            # send command to start
-            subprocess.call(command)
+                if this_settings:
+
+                    self._write_to_log(
+                        index,
+                        f"starting protocol = {this_protocol}, subject = {this_subject}, settings = {this_settings}",
+                    )
+
+                    self.protocol_handles[index] = self.matlab_engines[
+                        index
+                    ].RunProtocol(
+                        "StartSafe",
+                        this_protocol,
+                        this_subject,
+                        this_settings,
+                        nargout=0,
+                        background=True,
+                        stdout=io.StringIO(),
+                        stderr=io.StringIO(),
+                    )
+
+                else:
+
+                    self._write_to_log(
+                        index,
+                        f"starting protocol = {this_protocol}, subject = {this_subject}, settings = DefaultSettings",
+                    )
+
+                    self.protocol_handles[index] = self.matlab_engines[
+                        index
+                    ].RunProtocol(
+                        "StartSafe",
+                        this_protocol,
+                        this_subject,
+                        nargout=0,
+                        background=True,
+                        stdout=io.StringIO(),
+                        stderr=io.StringIO(),
+                    )
+
+                    self.check_running_protocol(
+                        BpodAcademy.CHECK_PROTOCOL_MS,
+                        lambda: self.check_running_protocol(index),
+                    )
+
+            else:
+
+                messagebox.showwarning(
+                    "Protocol Handle Exists!",
+                    f"Protocol handle already exists for {this_bpod}",
+                )
 
             self.bpod_status[index] = 2
             self.box_labels[index]["bg"] = BpodAcademy.ON_COLOR
+
+    def _check_running_protocol(self, index):
+
+        if self.protocol_handles[index] is not None:
+
+            if (not self.protocol_handles[index].done()) and (
+                not self.protocol_handles[index].cancelled()
+            ):
+                self.after(
+                    BpodAcademy.CHECK_PROTOCOL_MS,
+                    lambda: self._check_running_protocol(index),
+                )
 
     def _stop_bpod_protocol(self, index):
 
@@ -311,8 +389,12 @@ class BpodAcademy(Tk):
 
         else:
 
-            # send interrupt to stop running protocol
-            subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", "^C"])
+            if (not self.protocol_handles[index].cancelled()) and (
+                not self.protocol_handles[index].done()
+            ):
+                self._write_to_log(index, "stopping protocol")
+                self.protocol_handles[index].cancel()
+                self.protocol_handles[index] = None
 
             self.bpod_status[index] = 1
             self.box_labels[index]["bg"] = BpodAcademy.READY_COLOR
@@ -335,16 +417,16 @@ class BpodAcademy(Tk):
             Label(wait_dialog, text="Please wait...").pack()
             wait_dialog.update()
 
-            # send command to end bpod
-            subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", "EndBpod;\n"])
+            # end bpod
+            self._write_to_log(index, "ending Bpod")
+            self.matlab_engines[index].EndBpod(
+                nargout=0, stdout=self.bod_logs[index], stderr=self.bpod_logs[index]
+            )
 
-            # close matlab
-            subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", "exit\n"])
-
-            time.sleep(10)
-
-            # close screen session
-            subprocess.call(["screen", "-S", this_bpod, "-X", "quit"])
+            # close matlab engine
+            self._write_to_log(index, "exit matlab")
+            self.matlab_engines[index].exit()
+            self.matlab_engines[index] = None
 
             self.bpod_status[index] = 0
             self.box_labels[index]["bg"] = BpodAcademy.OFF_COLOR
@@ -360,6 +442,14 @@ class BpodAcademy(Tk):
             self._save_config()
 
         self.bpod_status.append(0)
+        self.matlab_engines.append(None)
+        self.protocol_handles.append(None)
+
+        # start logging to file
+        self.bpod_logs.append(io.StringIO())
+        self.._write_to_log(index, "created Bpod")
+        self.bpod_log_files.append(open(Path(f"{self.log_dir}/{this_bpod}.log"), "w"))
+        self._log_to_file(index)
 
         ### row 1: select port for box, add start button ###
 
