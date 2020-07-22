@@ -285,11 +285,11 @@ class BpodAcademy(Tk):
             command = ["screen", "-S", this_bpod, "-X", "stuff"]
             if this_settings:
                 command += [
-                    f"RunProtocol('Start', '{this_protocol}', '{this_subject}', '{this_settings}');\n"
+                    f"RunProtocol('StartSafe', '{this_protocol}', '{this_subject}', '{this_settings}');\n"
                 ]
             else:
                 command += [
-                    f"RunProtocol('Start', '{this_protocol}', '{this_subject}');\n"
+                    f"RunProtocol('StartSafe', '{this_protocol}', '{this_subject}');\n"
                 ]
 
             # send command to start
@@ -311,7 +311,7 @@ class BpodAcademy(Tk):
 
         else:
 
-            # send command to stop
+            # send interrupt to stop running protocol
             subprocess.call(["screen", "-S", this_bpod, "-X", "stuff", "^C"])
 
             self.bpod_status[index] = 1
