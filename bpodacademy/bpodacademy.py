@@ -1008,6 +1008,11 @@ class BpodAcademy(Tk):
 
                 closing_window.destroy()
 
+                ### Close log connections ###
+                for i in range(self.n_bpods):
+                    self.after_cancel(lambda: self._log_to_file(index))
+                    self.bpod_log_files[indexx].close()
+
                 ### close BpodAcademy ###
                 self.quit()
 
