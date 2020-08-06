@@ -40,7 +40,9 @@ class BpodAcademy(Tk):
 
         com_ports = list_ports.comports()
         bpod_ports = [
-            (p.serial_number, p.device) for p in com_ports if p.manufacturer is not None and 'duino' in p.manufacturer
+            (p.serial_number, p.device)
+            for p in com_ports
+            if p.manufacturer is not None and "duino" in p.manufacturer
         ]
         return bpod_ports
 
@@ -241,6 +243,17 @@ class BpodAcademy(Tk):
 
             wait_dialog.destroy()
 
+            ### check for calibration file ###
+            this_calibration_file = Path(
+                f"{self.bpod_dir}/Calibration Files/LiquidCalibration_{id}.mat"
+            )
+            if not this_calibration_file.exists():
+                messagebox.showwarning(
+                    "No Calibration File",
+                    f"Calibration file for Bpod {this_bpod} does not exist! Make sure to calibrate valves before running a protocol.",
+                    parent=self,
+                )
+
     def _switch_bpod_gui(self, index):
 
         this_bpod = self.cfg["ids"][index]
@@ -394,7 +407,6 @@ class BpodAcademy(Tk):
             elif self.protocol_handles[index].done():
 
                 self._stop_bpod_protocol(index)
-
 
     def _stop_bpod_protocol(self, index):
 
