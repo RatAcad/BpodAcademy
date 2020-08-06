@@ -1077,7 +1077,7 @@ class BpodAcademy(Tk):
         subject_menu.add_command(
             label="Add Subject", command=self._add_new_subject_window
         )
-        menubar.add_cascade(label="Protocols", menu=subject_menu)
+        menubar.add_cascade(label="Subjects", menu=subject_menu)
 
         settings_menu = Menu(menubar, tearoff=0)
         settings_menu.add_command(
