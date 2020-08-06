@@ -245,7 +245,7 @@ class BpodAcademy(Tk):
 
             ### check for calibration file ###
             this_calibration_file = Path(
-                f"{self.bpod_dir}/Calibration Files/LiquidCalibration_{id}.mat"
+                f"{self.bpod_dir}/Calibration Files/LiquidCalibration_{this_bpod}.mat"
             )
             if not this_calibration_file.exists():
                 messagebox.showwarning(
