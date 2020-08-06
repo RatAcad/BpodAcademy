@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="bpod-academy",
-    version="0.0.0",
+    version="0.0b0",
     author="Gary Kane",
     author_email="gakane@bu.edu",
     description="A simple GUI to control multiple Bpod devices",
