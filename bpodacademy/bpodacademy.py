@@ -1,9 +1,9 @@
 from tkinter import (
     Tk,
     Toplevel,
+    Menu,
     messagebox,
     filedialog,
-    simpledialog,
     Label,
     Entry,
     Button,
@@ -14,10 +14,10 @@ import os
 import glob
 from pathlib import Path
 import shutil
-import subprocess
 import csv
 import serial.tools.list_ports as list_ports
 import datetime
+import numpy as np
 from scipy.io import savemat
 import matlab.engine
 import io
@@ -39,11 +39,8 @@ class BpodAcademy(Tk):
     def _get_bpod_ports():
 
         com_ports = list_ports.comports()
-        all_ports = []
-        for p in com_ports:
-            all_ports.append(com_ports)
         bpod_ports = [
-            p[0] for p in all_ports if ("Arduino" in p[1]) or ("Teensy" in p[1])
+            (p.serial_number, p.device) for p in com_ports if p.manufacturer is not None and 'duino' in p.manufacturer
         ]
         return bpod_ports
 
@@ -74,7 +71,6 @@ class BpodAcademy(Tk):
         os.makedirs(self.log_dir, exist_ok=True)
 
         ### create window ###
-        self.n_bpods = 0
         self.bpod_status = []
         self.matlab_engines = []
         self.protocol_handles = []
@@ -181,10 +177,10 @@ class BpodAcademy(Tk):
 
         # write contents to file
         self.bpod_log_files[index].write(new_content)
+        self.bpod_log_files[index].flush()
 
         # run again in SAVE_LOG_MS milliseconds
         self.after(BpodAcademy.SAVE_LOG_MS, lambda: self._log_to_file(index))
-
 
     def _start_bpod(self, index):
 
@@ -205,6 +201,12 @@ class BpodAcademy(Tk):
             wait_dialog.update()
 
             this_port = self.selected_ports[index].get()
+            if this_port == "EMU":
+                this_serial = "EMU"
+            else:
+                port_index = [p[0] == this_port for p in self.bpod_ports]
+                port_index = port_index.index(True)
+                this_serial = self.bpod_ports[port_index][1]
 
             # start matlab engine for this bpod
             self._write_to_log(index, "starting matlab engine")
@@ -213,7 +215,7 @@ class BpodAcademy(Tk):
             # start bpod
             self._write_to_log(index, "starting Bpod")
             self.matlab_engines[index].Bpod(
-                this_port,
+                this_serial,
                 0,
                 0,
                 this_bpod,
@@ -280,7 +282,7 @@ class BpodAcademy(Tk):
             self.matlab_engines[index].BpodLiquidCalibration(
                 "Calibrate",
                 nargout=0,
-                stdout=self.bod_logs[index],
+                stdout=self.bpod_logs[index],
                 stderr=self.bpod_logs[index],
             )
 
@@ -326,8 +328,8 @@ class BpodAcademy(Tk):
                         this_settings,
                         nargout=0,
                         background=True,
-                        stdout=io.StringIO(),
-                        stderr=io.StringIO(),
+                        stdout=self.bpod_logs[index],
+                        stderr=self.bpod_logs[index],
                     )
 
                 else:
@@ -345,8 +347,8 @@ class BpodAcademy(Tk):
                         this_subject,
                         nargout=0,
                         background=True,
-                        stdout=io.StringIO(),
-                        stderr=io.StringIO(),
+                        stdout=self.bpod_logs[index],
+                        stderr=self.bpod_logs[index],
                     )
 
                     self.check_running_protocol(
@@ -371,10 +373,16 @@ class BpodAcademy(Tk):
             if (not self.protocol_handles[index].done()) and (
                 not self.protocol_handles[index].cancelled()
             ):
+
                 self.after(
                     BpodAcademy.CHECK_PROTOCOL_MS,
                     lambda: self._check_running_protocol(index),
                 )
+
+            elif self.protocol_handles[index].done():
+
+                self._stop_bpod_protocol(index)
+
 
     def _stop_bpod_protocol(self, index):
 
@@ -392,8 +400,14 @@ class BpodAcademy(Tk):
             if (not self.protocol_handles[index].cancelled()) and (
                 not self.protocol_handles[index].done()
             ):
+
                 self._write_to_log(index, "stopping protocol")
                 self.protocol_handles[index].cancel()
+                self.protocol_handles[index] = None
+
+            elif self.protocol_handles[index].done():
+
+                self._write_to_log(index, "protocol ended")
                 self.protocol_handles[index] = None
 
             self.bpod_status[index] = 1
@@ -420,7 +434,7 @@ class BpodAcademy(Tk):
             # end bpod
             self._write_to_log(index, "ending Bpod")
             self.matlab_engines[index].EndBpod(
-                nargout=0, stdout=self.bod_logs[index], stderr=self.bpod_logs[index]
+                nargout=0, stdout=self.bpod_logs[index], stderr=self.bpod_logs[index]
             )
 
             # close matlab engine
@@ -435,6 +449,8 @@ class BpodAcademy(Tk):
 
     def _add_box(self, id, port, index, new_box_window=None):
 
+        self.n_bpods += 1
+
         if new_box_window is not None:
             new_box_window.destroy()
             self.cfg["ids"].append(id)
@@ -447,8 +463,8 @@ class BpodAcademy(Tk):
 
         # start logging to file
         self.bpod_logs.append(io.StringIO())
-        self.._write_to_log(index, "created Bpod")
-        self.bpod_log_files.append(open(Path(f"{self.log_dir}/{this_bpod}.log"), "w"))
+        self._write_to_log(index, "created Bpod")
+        self.bpod_log_files.append(open(Path(f"{self.log_dir}/{id}.log"), "w"))
         self._log_to_file(index)
 
         ### row 1: select port for box, add start button ###
@@ -461,7 +477,7 @@ class BpodAcademy(Tk):
             Combobox(
                 self,
                 textvariable=self.selected_ports[index],
-                values=self.bpod_ports,
+                values=[p[0] for p in self.bpod_ports],
                 width=self.combobox_width,
             )
         )
@@ -619,7 +635,9 @@ class BpodAcademy(Tk):
         new_port = StringVar(new_box_window)
         Label(new_box_window, text="Serial Port: ").grid(sticky="w", row=1, column=0)
         Combobox(
-            new_box_window, textvariable=new_port, values=self.bpod_ports + ["EMU"]
+            new_box_window,
+            textvariable=new_port,
+            values=[p[0] for p in self.bpod_ports] + ["EMU"],
         ).grid(sticky="nsew", row=1, column=1)
 
         Button(
@@ -632,8 +650,6 @@ class BpodAcademy(Tk):
         Button(new_box_window, text="Cancel", command=new_box_window.destroy).grid(
             sticky="nsew", row=4, column=1
         )
-
-        self.n_bpods += 1
 
     def _add_new_subject(self, protocol, subject, window=None):
 
@@ -1009,9 +1025,9 @@ class BpodAcademy(Tk):
                 closing_window.destroy()
 
                 ### Close log connections ###
-                for i in range(self.n_bpods):
+                for index in range(self.n_bpods):
                     self.after_cancel(lambda: self._log_to_file(index))
-                    self.bpod_log_files[indexx].close()
+                    self.bpod_log_files[index].close()
 
                 ### close BpodAcademy ###
                 self.quit()
@@ -1043,10 +1059,40 @@ class BpodAcademy(Tk):
         self.stop_protocol_buttons = []
         self.end_buttons = []
 
+        ### create menu at top
+
+        menubar = Menu(self)
+
+        bpod_menu = Menu(menubar, tearoff=0)
+        bpod_menu.add_command(label="Add Bpod", command=self._add_new_box)
+        menubar.add_cascade(label="Bpod", menu=bpod_menu)
+
+        protocol_menu = Menu(menubar, tearoff=0)
+        protocol_menu.add_command(
+            label="Refresh Protocols", command=self._refresh_protocols
+        )
+        menubar.add_cascade(label="Protocols", menu=protocol_menu)
+
+        subject_menu = Menu(menubar, tearoff=0)
+        subject_menu.add_command(
+            label="Add Subject", command=self._add_new_subject_window
+        )
+        menubar.add_cascade(label="Protocols", menu=subject_menu)
+
+        settings_menu = Menu(menubar, tearoff=0)
+        settings_menu.add_command(
+            label="Copy Existing", command=self._copy_settings_window
+        )
+        settings_menu.add_command(
+            label="Create New", command=self._create_settings_window
+        )
+        menubar.add_cascade(label="Settings", menu=settings_menu)
+
+        self.config(menu=menubar)
+
         for i in range(len(self.cfg["ids"])):
 
             self._add_box(self.cfg["ids"][i], self.cfg["ports"][i], i)
-            self.n_bpods += 1
 
             if self.n_bpods % 5 == 0:
                 Label(self, width=5).grid(row=0, column=self.cur_col + 4)
@@ -1055,21 +1101,21 @@ class BpodAcademy(Tk):
 
         self.cur_row += 1
 
-        Button(self, text="Add Bpod", command=self._add_new_box).grid(
-            sticky="nsew", row=100, column=0
-        )
-        Button(self, text="Refresh Protocols", command=self._refresh_protocols).grid(
-            sticky="nsew", row=101, column=0
-        )
-        Button(self, text="Add Subject", command=self._add_new_subject_window).grid(
-            sticky="nsew", row=100, column=1
-        )
-        Button(self, text="Add Settings", command=self._add_new_settings_window).grid(
-            sticky="nsew", row=101, column=1
-        )
-        Button(self, text="Close", command=self._close_bpod_academy).grid(
-            sticky="nsew", row=101, column=2
-        )
+        # Button(self, text="Add Bpod", command=self._add_new_box).grid(
+        #     sticky="nsew", row=100, column=0
+        # )
+        # Button(self, text="Refresh Protocols", command=self._refresh_protocols).grid(
+        #     sticky="nsew", row=101, column=0
+        # )
+        # Button(self, text="Add Subject", command=self._add_new_subject_window).grid(
+        #     sticky="nsew", row=100, column=1
+        # )
+        # Button(self, text="Add Settings", command=self._add_new_settings_window).grid(
+        #     sticky="nsew", row=101, column=1
+        # )
+        # Button(self, text="Close", command=self._close_bpod_academy).grid(
+        #     sticky="nsew", row=101, column=2
+        # )
 
         self.protocol("WM_DELETE_WINDOW", self._close_bpod_academy)
 
