@@ -102,9 +102,13 @@ class BpodAcademy(Tk):
 
         # search protocol directory
         # return all protocols directories that contain a .m file of the same name
+        protocols = []
         protocol_dir = Path(f"{self.bpod_dir}/Protocols")
-        candidates = [p for p in protocol_dir.iterdir() if p.is_dir()]
-        protocols = [c.stem for c in candidates if (c / f"{c.stem}.m").is_file()]
+        if protocol_dir.exists():
+            candidates = [p for p in protocol_dir.iterdir() if p.is_dir()]
+            protocols = [c.stem for c in candidates if (c / f"{c.stem}.m").is_file()]
+        else:
+            os.makedirs(protocol_dir)
         return protocols
 
     def _refresh_protocols(self):
@@ -118,18 +122,26 @@ class BpodAcademy(Tk):
 
         # return subject directories from the data directory
         # that contain a subfolder for the selected protocol
+        subs_on_protocol = []
         data_dir = Path(f"{self.bpod_dir}/Data")
-        candidates = [d for d in data_dir.iterdir() if d.is_dir()]
-        subs_on_protocol = [c.stem for c in candidates if (c / protocol).exists()]
+        if data_dir.exists():
+            candidates = [d for d in data_dir.iterdir() if d.is_dir()]
+            subs_on_protocol = [c.stem for c in candidates if (c / protocol).exists()]
+        else:
+            os.makedirs(data_dir)
         return subs_on_protocol
 
     def _load_settings(self, protocol, subject):
 
         # return settings files in Data/subject/protocol/Session Settings
+        settings = []
         data_dir = Path(f"{self.bpod_dir}/Data")
-        sub_dir = data_dir / subject
-        settings_dir = sub_dir / protocol / "Session Settings"
-        settings = [s.stem for s in list(settings_dir.glob("*.mat"))]
+        if data_dir.exists():
+            sub_dir = data_dir / subject
+            settings_dir = sub_dir / protocol / "Session Settings"
+            settings = [s.stem for s in list(settings_dir.glob("*.mat"))]
+        else:
+            os.makedirs(data_dir)
         return settings
 
     def _read_config(self):
