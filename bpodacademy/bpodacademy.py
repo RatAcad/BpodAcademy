@@ -11,16 +11,13 @@ from tkinter import (
 )
 from tkinter.ttk import Combobox
 import os
-import glob
 from pathlib import Path
 import shutil
 import csv
 import serial.tools.list_ports as list_ports
-import datetime
-import numpy as np
 from scipy.io import savemat
-import matlab.engine
-import io
+
+from bpodacademy.process import BpodProcess
 
 
 class BpodAcademy(Tk):
@@ -30,8 +27,7 @@ class BpodAcademy(Tk):
     OFF_COLOR = "light salmon"
     READY_COLOR = "light goldenrod"
     ON_COLOR = "pale green"
-    CHECK_PROTOCOL_MS = 10000
-    SAVE_LOG_MS = 10000
+    CHECK_PROTOCOL_SEC = 1
 
     ### Utility functions ###
 
@@ -45,12 +41,6 @@ class BpodAcademy(Tk):
             if p.manufacturer is not None and "duino" in p.manufacturer
         ]
         return bpod_ports
-
-    @staticmethod
-    def _get_datetime_string():
-
-        date_time = datetime.datetime.now()
-        return date_time.strftime("%m/%d/%Y %H:%M:%S")
 
     ### Object methods ###
 
@@ -74,10 +64,8 @@ class BpodAcademy(Tk):
 
         ### create window ###
         self.bpod_status = []
-        self.matlab_engines = []
-        self.protocol_handles = []
-        self.bpod_logs = []
-        self.bpod_log_files = []
+        self.bpod_process = []
+        self.check_protocol = []
         self._create_window()
 
     def _set_bpod_directory(self):
@@ -174,28 +162,6 @@ class BpodAcademy(Tk):
             self.cfg["ports"][i] = self.selected_ports[i].get()
         self._save_config()
 
-    def _write_to_log(self, index, note=""):
-
-        self.bpod_logs[index].write(
-            f"{BpodAcademy._get_datetime_string()}\n{self.cfg['ids'][index]}: {note}\n\n"
-        )
-
-    def _log_to_file(self, index):
-
-        # get log content
-        new_content = self.bpod_logs[index].getvalue()
-
-        # flush contents from log
-        self.bpod_logs[index].truncate(0)
-        self.bpod_logs[index].seek(0)
-
-        # write contents to file
-        self.bpod_log_files[index].write(new_content)
-        self.bpod_log_files[index].flush()
-
-        # run again in SAVE_LOG_MS milliseconds
-        self.after(BpodAcademy.SAVE_LOG_MS, lambda: self._log_to_file(index))
-
     def _start_bpod(self, index):
 
         this_bpod = self.cfg["ids"][index]
@@ -205,6 +171,7 @@ class BpodAcademy(Tk):
             messagebox.showwarning(
                 "Bpod already started!",
                 f"{this_bpod} has already been started. Please close it before restarting.",
+                parent=self,
             )
 
         else:
@@ -222,26 +189,21 @@ class BpodAcademy(Tk):
                 port_index = port_index.index(True)
                 this_serial = self.bpod_ports[port_index][1]
 
-            # start matlab engine for this bpod
-            self._write_to_log(index, "starting matlab engine")
-            self.matlab_engines[index] = matlab.engine.start_matlab()
+            self.bpod_process[index] = BpodProcess(this_bpod, this_serial, self.log_dir)
 
-            # start bpod
-            self._write_to_log(index, "starting Bpod")
-            self.matlab_engines[index].Bpod(
-                this_serial,
-                0,
-                0,
-                this_bpod,
-                nargout=0,
-                stdout=self.bpod_logs[index],
-                stderr=self.bpod_logs[index],
-            )
-
-            self.bpod_status[index] = 1
-            self.box_labels[index]["bg"] = BpodAcademy.READY_COLOR
+            code = self.bpod_process[index].start()
 
             wait_dialog.destroy()
+
+            if code:
+                self.bpod_status[index] = 1
+                self.box_labels[index]["bg"] = BpodAcademy.READY_COLOR
+            else:
+                messagebox.showerror(
+                    "Bpod Error!",
+                    f"There was an error trying to start {this_bpod}",
+                    parent=self,
+                )
 
             ### check for calibration file ###
             this_calibration_file = Path(
@@ -263,24 +225,33 @@ class BpodAcademy(Tk):
             messagebox.showwarning(
                 "Bpod not started!",
                 f"{this_bpod} has not been started. Please start Bpod before showing the GUI.",
+                parent=self,
+            )
+
+        elif self.bpod_status[index] == 2:
+
+            messagebox.showwarning(
+                "Protocol running",
+                f"A protocol is currently running on {this_bpod}. The Bpod Console cannot be displayed/hidden while a protocol is running.",
+                parent=self,
             )
 
         else:
 
-            # call switch gui
-            self._write_to_log(index, "switch gui")
-            self.matlab_engines[index].eval(
-                "BpodSystem.SwitchGUI();",
-                nargout=0,
-                stdout=self.bpod_logs[index],
-                stderr=self.bpod_logs[index],
-            )
+            code = self.bpod_process[index].send_command(("GUI",))
 
-            self.switch_gui_buttons[index]["text"] = (
-                "Hide GUI"
-                if self.switch_gui_buttons[index]["text"] == "Show GUI"
-                else "Show GUI"
-            )
+            if code == ("GUI", True):
+                self.switch_gui_buttons[index]["text"] = (
+                    "Hide GUI"
+                    if self.switch_gui_buttons[index]["text"] == "Show GUI"
+                    else "Show GUI"
+                )
+            else:
+                messagebox.showerror(
+                    "Bpod Console Error!",
+                    f"There was an error trying to display/hide the Bpod Console for {this_bpod}.",
+                    parent=self,
+                )
 
     def _calibrate_bpod(self, index):
 
@@ -291,6 +262,7 @@ class BpodAcademy(Tk):
             messagebox.showwarning(
                 "Bpod not started!",
                 f"{this_bpod} has not been started. Please start before calibrating.",
+                parent=self,
             )
 
         elif self.bpod_status[index] == 2:
@@ -298,18 +270,19 @@ class BpodAcademy(Tk):
             messagebox.showwarning(
                 "Protocol in progress!",
                 f"A protocol is currently running on {this_bpod}. You cannot calibrate while a protocol is in session",
+                parent=self,
             )
 
         else:
 
-            # call calibration gui
-            self._write_to_log(index, "calibrate")
-            self.matlab_engines[index].BpodLiquidCalibration(
-                "Calibrate",
-                nargout=0,
-                stdout=self.bpod_logs[index],
-                stderr=self.bpod_logs[index],
-            )
+            code = self.bpod_process[index].send_command(("CALIBRATE",))
+
+            if code != ("CALIBRATE", True):
+                messagebox.showerror(
+                    "Calibration Error!",
+                    f"There was an error trying to display the Calibration window for {this_bpod}",
+                    parent=self,
+                )
 
     def _run_bpod_protocol(self, index):
 
@@ -327,6 +300,7 @@ class BpodAcademy(Tk):
             messagebox.showwarning(
                 "Protocol in progress!",
                 f"A protocol is currently running on {this_bpod}. Please stop this protocol and then restart.",
+                parent=self,
             )
 
         else:
@@ -335,78 +309,56 @@ class BpodAcademy(Tk):
             this_subject = self.selected_subjects[index].get()
             this_settings = self.selected_settings[index].get()
 
-            if self.protocol_handles[index] is None:
+            if (not this_protocol) or (not this_subject):
 
-                if this_settings:
-
-                    self._write_to_log(
-                        index,
-                        f"starting protocol = {this_protocol}, subject = {this_subject}, settings = {this_settings}",
-                    )
-
-                    self.protocol_handles[index] = self.matlab_engines[
-                        index
-                    ].RunProtocol(
-                        "StartSafe",
-                        this_protocol,
-                        this_subject,
-                        this_settings,
-                        nargout=0,
-                        background=True,
-                        stdout=self.bpod_logs[index],
-                        stderr=self.bpod_logs[index],
-                    )
-
-                else:
-
-                    self._write_to_log(
-                        index,
-                        f"starting protocol = {this_protocol}, subject = {this_subject}, settings = DefaultSettings",
-                    )
-
-                    self.protocol_handles[index] = self.matlab_engines[
-                        index
-                    ].RunProtocol(
-                        "StartSafe",
-                        this_protocol,
-                        this_subject,
-                        nargout=0,
-                        background=True,
-                        stdout=self.bpod_logs[index],
-                        stderr=self.bpod_logs[index],
-                    )
-
-                    self.check_running_protocol(
-                        BpodAcademy.CHECK_PROTOCOL_MS,
-                        lambda: self.check_running_protocol(index),
-                    )
+                messagebox.showerror(
+                    "Protocol Not Started!",
+                    f"Protocol on {this_bpod} was not started: make sure to select a protocol and subject!",
+                    parent=self,
+                )
 
             else:
 
-                messagebox.showwarning(
-                    "Protocol Handle Exists!",
-                    f"Protocol handle already exists for {this_bpod}",
+                this_settings = this_settings if this_settings else "DefaultSettings"
+
+                code = self.bpod_process[index].send_command(
+                    ("RUN", this_protocol, this_subject, this_settings)
                 )
 
-            self.bpod_status[index] = 2
-            self.box_labels[index]["bg"] = BpodAcademy.ON_COLOR
+                if code[0] == "RUN":
+                    if code[1] > 0:
+                        self.check_protocol[index] = self.after(
+                            BpodAcademy.CHECK_PROTOCOL_SEC * 1000,
+                            lambda: self._check_running_protocol(index),
+                        )
+                        self.bpod_status[index] = 2
+                        self.box_labels[index]["bg"] = BpodAcademy.ON_COLOR
+                    else:
+                        messagebox.showwarning(
+                            "Protocol did not start!",
+                            f"Protocol failed to start on {this_bpod}! Please check the log for error messages.",
+                            parent=self,
+                        )
 
     def _check_running_protocol(self, index):
 
-        if self.protocol_handles[index] is not None:
+        code = self.bpod_process[index].send_command(("QUERY",))
 
-            if (not self.protocol_handles[index].done()) and (
-                not self.protocol_handles[index].cancelled()
-            ):
+        if code == ("QUERY", True):
 
-                self.after(
-                    BpodAcademy.CHECK_PROTOCOL_MS,
-                    lambda: self._check_running_protocol(index),
-                )
+            self.check_protocol[index] = self.after(
+                BpodAcademy.CHECK_PROTOCOL_SEC * 1000,
+                lambda: self._check_running_protocol(index),
+            )
 
-            elif self.protocol_handles[index].done():
+        else:
 
-                self._stop_bpod_protocol(index)
+            self._stop_bpod_protocol(index)
+            messagebox.showwarning(
+                "Protocol Ended!",
+                f"The protocol running on {self.cfg['ids'][index]} ended!",
+                parent=self,
+            )
 
     def _stop_bpod_protocol(self, index):
 
@@ -417,25 +369,24 @@ class BpodAcademy(Tk):
             messagebox.showwarning(
                 "Protocol not running!",
                 f"A protocol is not currently running on {this_bpod}.",
+                parent=self,
             )
 
         else:
 
-            if (not self.protocol_handles[index].cancelled()) and (
-                not self.protocol_handles[index].done()
-            ):
+            self.after_cancel(self.check_protocol[index])
+            code = self.bpod_process[index].send_command(("STOP",))
 
-                self._write_to_log(index, "stopping protocol")
-                self.protocol_handles[index].cancel()
-                self.protocol_handles[index] = None
-
-            elif self.protocol_handles[index].done():
-
-                self._write_to_log(index, "protocol ended")
-                self.protocol_handles[index] = None
-
-            self.bpod_status[index] = 1
-            self.box_labels[index]["bg"] = BpodAcademy.READY_COLOR
+            if code[0] == "STOP":
+                if code[1] >= 0:
+                    self.bpod_status[index] = 1
+                    self.box_labels[index]["bg"] = BpodAcademy.READY_COLOR
+                else:
+                    messagebox.showwarning(
+                        "Protocol still runnning!",
+                        f"Failed to stop protocol on {this_bpod}, please try again in a few seconds.",
+                        parent=self,
+                    )
 
     def _end_bpod(self, index):
 
@@ -446,6 +397,7 @@ class BpodAcademy(Tk):
             messagebox.showwarning(
                 "Protocol in progress!",
                 f"A protocol is currently running on {this_bpod}. Please stop the protocol if you wish to close this Bpod.",
+                parent=self,
             )
 
         elif self.bpod_status[index] == 1:
@@ -456,20 +408,19 @@ class BpodAcademy(Tk):
             wait_dialog.update()
 
             # end bpod
-            self._write_to_log(index, "ending Bpod")
-            self.matlab_engines[index].EndBpod(
-                nargout=0, stdout=self.bpod_logs[index], stderr=self.bpod_logs[index]
-            )
-
-            # close matlab engine
-            self._write_to_log(index, "exit matlab")
-            self.matlab_engines[index].exit()
-            self.matlab_engines[index] = None
-
-            self.bpod_status[index] = 0
-            self.box_labels[index]["bg"] = BpodAcademy.OFF_COLOR
+            code = self.bpod_process[index].send_command(("END",))
 
             wait_dialog.destroy()
+
+            if code == ("END", True):
+                self.bpod_status[index] = 0
+                self.box_labels[index]["bg"] = BpodAcademy.OFF_COLOR
+            else:
+                messagebox.showwarning(
+                    "Bpod Still Open!",
+                    f"{this_bpod} was not successfully closed.",
+                    parent=self,
+                )
 
     def _add_box(self, id, port, index, new_box_window=None):
 
@@ -482,14 +433,8 @@ class BpodAcademy(Tk):
             self._save_config()
 
         self.bpod_status.append(0)
-        self.matlab_engines.append(None)
-        self.protocol_handles.append(None)
-
-        # start logging to file
-        self.bpod_logs.append(io.StringIO())
-        self._write_to_log(index, "created Bpod")
-        self.bpod_log_files.append(open(Path(f"{self.log_dir}/{id}.log"), "w"))
-        self._log_to_file(index)
+        self.bpod_process.append(None)
+        self.check_protocol.append(None)
 
         ### row 1: select port for box, add start button ###
 
@@ -501,7 +446,7 @@ class BpodAcademy(Tk):
             Combobox(
                 self,
                 textvariable=self.selected_ports[index],
-                values=[p[0] for p in self.bpod_ports],
+                values=[p[0] for p in self.bpod_ports] + ["EMU"],
                 width=self.combobox_width,
             )
         )
@@ -748,6 +693,7 @@ class BpodAcademy(Tk):
             messagebox.showerror(
                 "File Does Not Exist!",
                 f"The settings file {copy_from.stem} for subject {from_subject} and protocol {from_protocol} does not exist!",
+                parent=self,
             )
             return
 
@@ -889,6 +835,7 @@ class BpodAcademy(Tk):
             if not messagebox.showwarning(
                 "File Exists!",
                 f"The settings file {settings_file} for subject {subject} and protocol {protocol} already exists. Do you want to overwrite it?",
+                parent=self,
             ):
                 return
 
@@ -1026,7 +973,8 @@ class BpodAcademy(Tk):
         ### check for running sessions ###
         if any([status == 2 for status in self.bpod_status]):
             messagebox.showwarning(
-                "Bpod protocol(s) are currently running. Please close open protocols before exiting BpodAcademy."
+                "Bpod protocol(s) are currently running. Please close open protocols before exiting BpodAcademy.",
+                parent=self,
             )
         else:
 
@@ -1048,13 +996,17 @@ class BpodAcademy(Tk):
 
                 closing_window.destroy()
 
-                ### Close log connections ###
-                for index in range(self.n_bpods):
-                    self.after_cancel(lambda: self._log_to_file(index))
-                    self.bpod_log_files[index].close()
-
                 ### close BpodAcademy ###
                 self.quit()
+
+    def _delete_logs(self):
+
+        [log_file.unlink() for log_file in self.log_dir.iterdir()]
+        messagebox.showinfo(
+            "Logs Deleted",
+            "Log files have been deleted. New logs will be created when you start Bpods.",
+            parent=self,
+        )
 
     def _create_window(self):
 
@@ -1112,6 +1064,10 @@ class BpodAcademy(Tk):
         )
         menubar.add_cascade(label="Settings", menu=settings_menu)
 
+        logs_menu = Menu(menubar, tearoff=0)
+        logs_menu.add_command(label="Delete Logs", command=self._delete_logs)
+        menubar.add_cascade(label="Logs", menu=logs_menu)
+
         self.config(menu=menubar)
 
         for i in range(len(self.cfg["ids"])):
@@ -1124,22 +1080,6 @@ class BpodAcademy(Tk):
                 self.cur_row = 0
 
         self.cur_row += 1
-
-        # Button(self, text="Add Bpod", command=self._add_new_box).grid(
-        #     sticky="nsew", row=100, column=0
-        # )
-        # Button(self, text="Refresh Protocols", command=self._refresh_protocols).grid(
-        #     sticky="nsew", row=101, column=0
-        # )
-        # Button(self, text="Add Subject", command=self._add_new_subject_window).grid(
-        #     sticky="nsew", row=100, column=1
-        # )
-        # Button(self, text="Add Settings", command=self._add_new_settings_window).grid(
-        #     sticky="nsew", row=101, column=1
-        # )
-        # Button(self, text="Close", command=self._close_bpod_academy).grid(
-        #     sticky="nsew", row=101, column=2
-        # )
 
         self.protocol("WM_DELETE_WINDOW", self._close_bpod_academy)
 
