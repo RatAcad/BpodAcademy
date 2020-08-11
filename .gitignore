@@ -4,6 +4,7 @@
 
 .vscode
 .DS_Store
+*test*
 
 #######################################
 ### standard python package gitignore
