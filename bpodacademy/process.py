@@ -11,22 +11,21 @@ import matlab.engine
 import io
 
 
-# Define Constants
-
-WAIT_START_PROCESS_SEC = 30
-WAIT_EXEC_COMMAND_SEC = 10
-WAIT_START_PROTOCOL_SEC = 1
-WAIT_KILL_PROTOCOL_SEC = 10
-WAIT_KILL_PROCESS_SEC = 10
-SAVE_LOG_SEC = 1
-
-
 class BpodProcess:
     """BpodProcess Class
 
         Controls individual instances of matlab.engine in background processes,
         using the multiprocess package.
     """
+
+    # Define Constants
+
+    WAIT_START_PROCESS_SEC = 30
+    WAIT_EXEC_COMMAND_SEC = 10
+    WAIT_START_PROTOCOL_SEC = 1
+    WAIT_KILL_PROTOCOL_SEC = 10
+    WAIT_KILL_PROCESS_SEC = 10
+    SAVE_LOG_SEC = 1
 
     # Utility Functions
 
@@ -53,7 +52,7 @@ class BpodProcess:
 
         self.id = id
         self.serial_port = serial_port
-        self.ctx = mp.get_context("spawn")
+        self.ctx = mp.get_context("fork")
         self.log_dir = (
             Path(log_dir) if log_dir is not None else Path("~/logs").expanduser()
         )
@@ -80,7 +79,7 @@ class BpodProcess:
     def _write_log_on_thread(self):
 
         while self.write_log:
-            time.sleep(SAVE_LOG_SEC)
+            time.sleep(BpodProcess.SAVE_LOG_SEC)
             self._log_to_file()
 
     def _open_log_thread(self):
@@ -179,7 +178,7 @@ class BpodProcess:
             self.protocol_thread.start()
 
             # wait to see if protocol starts successfully
-            time.sleep(WAIT_START_PROTOCOL_SEC)
+            time.sleep(BpodProcess.WAIT_START_PROTOCOL_SEC)
 
             if self.protocol_thread.is_alive():
                 return 1
@@ -217,10 +216,10 @@ class BpodProcess:
 
                 self._write_to_log("stopping protocol...")
                 self.protocol_thread.raise_exc(KeyboardInterrupt)
-                #self.protocol_thread.terminate()
 
                 # wait for thread to complete after termination signal
-                self.protocol_thread.join(timeout=WAIT_KILL_PROTOCOL_SEC)
+                self.protocol_thread.join(timeout=BpodProcess.WAIT_KILL_PROTOCOL_SEC)
+
                 if not self.protocol_thread.is_alive():
                     self.protocol_thread = None
                     self._write_to_log("protocol ended")
