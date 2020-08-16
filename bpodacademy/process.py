@@ -56,6 +56,7 @@ class BpodProcess:
         self.log_dir = (
             Path(log_dir) if log_dir is not None else Path("~/logs").expanduser()
         )
+        self.protocol_details = None
 
     def _write_to_log(self, note=""):
 
@@ -66,14 +67,14 @@ class BpodProcess:
     def _log_to_file(self):
 
         # get log content
-        new_content = self.stdout.getvalue()
+        new_content_stdout = self.stdout.getvalue()
 
         # flush contents from log
         self.stdout.truncate(0)
         self.stdout.seek(0)
 
         # write contents to file
-        self.log_file.write(new_content)
+        self.log_file.write(new_content_stdout)
         self.log_file.flush()
 
     def _write_log_on_thread(self):
@@ -169,6 +170,8 @@ class BpodProcess:
                 f"starting protocol = {protocol}, subject = {subject}, settings = {settings}",
             )
 
+            self.protocol_details = (protocol, subject, settings)
+
             self.protocol_thread = kthread.KThread(
                 target=self._run_protocol_on_thread,
                 args=(protocol, subject, settings),
@@ -201,12 +204,12 @@ class BpodProcess:
             stderr=self.stdout,
         )
 
-    def _query_protocol(self):
+    def _query_status(self):
 
         if (self.protocol_thread is not None) and (self.protocol_thread.is_alive()):
-            return True
+            return (True,) + self.protocol_details
         else:
-            return False
+            return (False,)
 
     def _stop_protocol(self):
 
@@ -214,22 +217,19 @@ class BpodProcess:
 
             if self.protocol_thread.is_alive():
 
-                self._write_to_log("stopping protocol...")
+                self._write_to_log("manually stopping protocol...")
                 self.protocol_thread.raise_exc(KeyboardInterrupt)
 
                 # wait for thread to complete after termination signal
                 self.protocol_thread.join(timeout=BpodProcess.WAIT_KILL_PROTOCOL_SEC)
 
-                if not self.protocol_thread.is_alive():
-                    self.protocol_thread = None
-                    self._write_to_log("protocol ended")
-                    return 1
-                else:
+                if self.protocol_thread.is_alive():
                     return -1
 
-            else:
-
-                return 2
+            self.protocol_details = None
+            self.protocol_thread = None
+            self._write_to_log("protocol ended")
+            return 1
 
         else:
 
@@ -304,8 +304,8 @@ class BpodProcess:
             # check if protocol is running
             elif cmd == "QUERY":
 
-                code = self._query_protocol()
-                self.q_to_main.put(("QUERY", code))
+                code = self._query_status()
+                self.q_to_main.put(("QUERY",) + code)
 
     def _run_process(self):
 

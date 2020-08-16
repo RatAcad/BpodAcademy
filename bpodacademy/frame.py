@@ -18,12 +18,13 @@ class BpodFrame(tk.Frame):
     GRID_WIDTH = 15
     CHECK_PROTOCOL_MS = 1000
     CHECK_SERVER_COMMANDS_MS = 1000
+    ZMQ_REQUEST_RCVTIMEO_MS = 30000
 
     def __init__(
         self,
         bpod_id,
         serial_number,
-        status=0,
+        status=(0,),
         request_socket=None,
         subscribe_socket=None,
         ip=None,
@@ -36,11 +37,15 @@ class BpodFrame(tk.Frame):
 
         self.bpod_id = bpod_id
         self.serial_number = tk.StringVar(self, value=serial_number)
-        self.status = status
+        self.status = status[0]
         if self.status == 2:
+            self.protocol_details = (status[1], status[2], status[3])
             self.check_protocol = self.after(
                 BpodFrame.CHECK_PROTOCOL_MS, self._check_running_protocol
             )
+        else:
+            self.protocol_details = (None, None, None)
+
         self.remote = remote
 
         if (request_socket is None) or (subscribe_socket is None):
@@ -71,10 +76,11 @@ class BpodFrame(tk.Frame):
 
         return reply
 
-    def _remote_to_server(self, msg):
+    def _remote_to_server(self, msg, timeout=ZMQ_REQUEST_RCVTIMEO_MS):
 
         if self.request is not None:
 
+            self.request.setsockopt(zmq.RCVTIMEO, timeout)
             self.request.send_pyobj(msg)
 
             try:
@@ -132,10 +138,16 @@ class BpodFrame(tk.Frame):
 
         if self.status == 0:
             label_color = BpodFrame.OFF_COLOR
+            serial_selection_state = "readonly"
+            protocol_selection_state = "readonly"
         elif self.status == 1:
             label_color = BpodFrame.READY_COLOR
+            serial_selection_state = "disabled"
+            protocol_selection_state = "readonly"
         elif self.status == 2:
             label_color = BpodFrame.ON_COLOR
+            serial_selection_state = "disabled"
+            protocol_selection_state = "disabled"
 
         self.box_label = tk.Label(self, text=self.bpod_id, bg=label_color)
         self.box_label.grid(sticky="w", row=0, column=0)
@@ -144,6 +156,7 @@ class BpodFrame(tk.Frame):
             self,
             textvariable=self.serial_number,
             values=[p[0] for p in self.bpod_ports] + ["EMU"],
+            state=serial_selection_state,
             width=BpodFrame.GRID_WIDTH,
         )
 
@@ -155,7 +168,7 @@ class BpodFrame(tk.Frame):
 
         ### row 1: select protocol, switch gui, and start protocol
 
-        self.protocol = tk.StringVar(self)
+        self.protocol = tk.StringVar(self, value=self.protocol_details[0])
         protocol_label = tk.Label(self, text="Protocol: ")
         protocol_label.grid(sticky="w", row=1, column=0)
 
@@ -163,7 +176,7 @@ class BpodFrame(tk.Frame):
             self,
             textvariable=self.protocol,
             values=self._get_protocols(),
-            state="readonly",
+            state=protocol_selection_state,
             width=BpodFrame.GRID_WIDTH,
         )
         self.protocol_entry.bind("<<ComboboxSelected>>", self._update_subject_list)
@@ -184,13 +197,13 @@ class BpodFrame(tk.Frame):
 
         ### row 2: select subject, calibrate, stop protocol
 
-        self.subject = tk.StringVar(self)
+        self.subject = tk.StringVar(self, value=self.protocol_details[1])
         subject_label = tk.Label(self, text="Subject: ")
         subject_label.grid(sticky="w", row=2, column=0)
         self.subject_entry = ttk.Combobox(
             self,
             textvariable=self.subject,
-            state="readonly",
+            state=protocol_selection_state,
             width=BpodFrame.GRID_WIDTH,
         )
         self.subject_entry.bind("<<ComboboxSelected>>", self._update_settings_list)
@@ -211,13 +224,13 @@ class BpodFrame(tk.Frame):
 
         ### row 3: select settings, end bpod
 
-        self.settings = tk.StringVar(self)
+        self.settings = tk.StringVar(self, value=self.protocol_details[2])
         settings_label = tk.Label(self, text="Settings: ")
         settings_label.grid(sticky="w", row=3, column=0)
         self.settings_entry = ttk.Combobox(
             self,
             textvariable=self.settings,
-            state="readonly",
+            state=protocol_selection_state,
             width=BpodFrame.GRID_WIDTH,
         )
         self.settings_entry.grid(sticky="nsew", row=3, column=1)
@@ -227,11 +240,21 @@ class BpodFrame(tk.Frame):
 
     def _change_port(self, event=None):
 
-        reply = self._remote_to_server(
-            ("BPOD", "CHANGE_PORT", self.bpod_id, self.serial_number.get())
-        )
-        if not reply:
-            self._no_server_message("BPOD CHANGE_PORT")
+        if self.status == 0:
+
+            reply = self._remote_to_server(
+                ("BPOD", "CHANGE_PORT", self.bpod_id, self.serial_number.get())
+            )
+            if not reply:
+                self._no_server_message("BPOD CHANGE_PORT")
+
+        # else:
+
+        #     cfg = self._remote_to_server(("CONFIG",))
+        #     port_index = cfg["bpod_ids"].index(self.bpod_id)
+        #     self.serial_number.set(cfg["bpod_serials"][port_index])
+
+        #     tk.messagebox.showwarning("Bpod Active!", f"{self.bpod_id} is currently active. Please close the Bpod before changing the serial port.")
 
     def _start_bpod(self):
 
@@ -260,6 +283,8 @@ class BpodFrame(tk.Frame):
 
         self.status = 1
         self.box_label["bg"] = BpodFrame.READY_COLOR
+        self.serial_entry["state"] = "disabled"
+
         if code == 2:
             tk.messagebox.showwarning(
                 "No Calibration File",
@@ -392,6 +417,9 @@ class BpodFrame(tk.Frame):
         self.protocol.set(protocol)
         self.subject.set(subject)
         self.settings.set(settings)
+        self.protocol_entry["state"] = "disabled"
+        self.subject_entry["state"] = "disabled"
+        self.settings_entry["state"] = "disabled"
 
     def _check_running_protocol(self):
 
@@ -402,7 +430,8 @@ class BpodFrame(tk.Frame):
             if reply is None:
                 self._no_server_message("QUERY")
             else:
-                if reply == 2:
+                status = reply[0]
+                if status == 2:
                     self.check_protocol = self.after(
                         BpodFrame.CHECK_PROTOCOL_MS, self._check_running_protocol
                     )
@@ -430,7 +459,7 @@ class BpodFrame(tk.Frame):
 
             if reply is None:
                 self._no_server_message("STOP")
-            elif reply <= 0:
+            elif reply < 0:
                 tk.messagebox.showwarning(
                     "Protocol still runnning!",
                     f"Failed to stop protocol on {self.bpod_id}, please try again in a few seconds.",
@@ -442,6 +471,9 @@ class BpodFrame(tk.Frame):
         self.after_cancel(self.check_protocol)
         self.status = 1
         self.box_label["bg"] = BpodFrame.READY_COLOR
+        self.protocol_entry["state"] = "readonly"
+        self.subject_entry["state"] = "readonly"
+        self.settings_entry["state"] = "readonly"
 
     def _end_bpod(self):
 
@@ -464,20 +496,5 @@ class BpodFrame(tk.Frame):
 
         self.status = 0
         self.box_label["bg"] = BpodFrame.OFF_COLOR
-
-    # def _server_to_remotes(self):
-
-    #     try:
-
-    #         cmd = self.subscribe.recv_pyobj()
-
-    #         if cmd[0] == "PORTS" and cmd[1] == self.bpod_id:
-
-    #             cmd[1] = bpod_id
-
-    #     except zmq.Again:
-
-    #         pass
-
-    #     self.after(BpodFrame.CHECK_SERVER_COMMANDS_MS, self._server_to_remotes)
+        self.serial_entry["state"] = "readonly"
 

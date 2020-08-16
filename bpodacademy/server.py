@@ -61,25 +61,28 @@ class BpodAcademyServer:
     def _read_config(self):
 
         bpod_ids = []
-        serial_numbers = []
+        bpod_serials = []
+        bpod_status = []
 
         if os.path.isfile(self.cfg_file):
 
             cfg_reader = csv.reader(open(self.cfg_file, newline=""))
             for i in cfg_reader:
                 bpod_ids.append(i[0])
-                serial_numbers.append(i[1])
+                bpod_serials.append(i[1])
+                bpod_status.append((0, None, None, None))
 
         self.cfg = {
             "bpod_dir": self.bpod_dir,
             "bpod_ids": bpod_ids,
-            "serial_numbers": serial_numbers,
+            "bpod_serials": bpod_serials,
+            "bpod_status": bpod_status,
         }
 
     def _save_config(self):
 
         cfg_writer = csv.writer(open(self.cfg_file, "w", newline=""))
-        for n, s in zip(self.cfg["bpod_ids"], self.cfg["serial_numbers"]):
+        for n, s in zip(self.cfg["bpod_ids"], self.cfg["bpod_serials"]):
             cfg_writer.writerow([n, s])
 
     def start(self):
@@ -153,12 +156,14 @@ class BpodAcademyServer:
                         self.reply.send_pyobj(res)
 
                     elif cmd[1] == "CREATE":
-                        
+
                         protocol = cmd[2]
                         subject = cmd[3]
                         settings_file = cmd[4]
                         settings_dict = cmd[5]
-                        res = self._create_settings_file(protocol, subject, settings_file, settings_dict)
+                        res = self._create_settings_file(
+                            protocol, subject, settings_file, settings_dict
+                        )
                         self.reply.send_pyobj(res)
 
                 elif cmd[0] == "LOGS":
@@ -171,27 +176,27 @@ class BpodAcademyServer:
                 elif cmd[0] == "BPOD":
 
                     if cmd[1] == "ADD":
-                   
+
                         bpod_id = cmd[2]
                         bpod_serial = cmd[3]
                         res = self._add_box(bpod_id, bpod_serial)
                         self.reply.send_pyobj(res)
 
                     if cmd[1] == "REMOVE":
-                   
+
                         bpod_id = cmd[2]
                         res = self._remove_box(bpod_id)
                         self.reply.send_pyobj(res)
 
                     if cmd[1] == "CHANGE_PORT":
-                        
+
                         bpod_id = cmd[2]
                         bpod_serial = cmd[3]
                         res = self._change_port(bpod_id, bpod_serial)
                         self.reply.send_pyobj(res)
 
                         bpod_cfg_index = self.cfg["bpod_ids"].index(bpod_id)
-                        self.cfg["serial_numbers"][bpod_cfg_index] = bpod_serial
+                        self.cfg["bpod_serials"][bpod_cfg_index] = bpod_serial
                         self._save_config()
                         self.publish.send_pyobj(cmd)
 
@@ -227,7 +232,7 @@ class BpodAcademyServer:
                 elif cmd[0] == "QUERY":
 
                     bpod_id = cmd[1]
-                    res = self._query_bpod_protocol(bpod_id)
+                    res = self._query_bpod_status(bpod_id)
                     self.reply.send_pyobj(res)
 
                 elif cmd[0] == "STOP":
@@ -241,6 +246,11 @@ class BpodAcademyServer:
                     bpod_id = cmd[1]
                     res = self._end_bpod(bpod_id)
                     self.reply.send_pyobj(res)
+
+                elif cmd[0] == "CLOSE":
+
+                    self.publish.send_pyobj(("CLOSE",))
+                    self.reply.send_pyobj(True)
 
                 else:
 
@@ -345,7 +355,8 @@ class BpodAcademyServer:
         if bpod_id not in self.cfg["bpod_ids"]:
 
             self.cfg["bpod_ids"].append(bpod_id)
-            self.cfg["serial_numbers"].append(bpod_serial)
+            self.cfg["bpod_serials"].append(bpod_serial)
+            self.bpod_process.append(None)
             self._save_config()
             self.publish.send_pyobj(("BPOD", "ADD", bpod_id, bpod_serial))
 
@@ -365,7 +376,7 @@ class BpodAcademyServer:
 
             bpod_index = self.cfg["bpod_ids"].index(bpod_id)
             self.cfg["bpod_ids"].pop(bpod_index)
-            self.cfg["serial_numbers"].pop(bpod_index)
+            self.cfg["bpod_serials"].pop(bpod_index)
             self._save_config()
             if self.bpod_process[bpod_index] is not None:
                 self.bpod_process[bpod_index].close()
@@ -377,7 +388,7 @@ class BpodAcademyServer:
     def _change_port(self, bpod_id, bpod_serial):
 
         bpod_cfg_index = self.cfg["bpod_ids"].index(bpod_id)
-        self.cfg["serial_numbers"][bpod_cfg_index] = bpod_serial
+        self.cfg["bpod_serials"][bpod_cfg_index] = bpod_serial
         self._save_config()
         self.publish.send_pyobj(("BPOD", "CHANGE_PORT", bpod_id, bpod_serial))
         return True
@@ -385,7 +396,7 @@ class BpodAcademyServer:
     def _start_bpod(self, bpod_id):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
-        bpod_serial = self.cfg["serial_numbers"][bpod_index]
+        bpod_serial = self.cfg["bpod_serials"][bpod_index]
         bpod_ports = BpodAcademyServer._get_bpod_ports()
 
         if bpod_serial == "EMU":
@@ -414,6 +425,7 @@ class BpodAcademyServer:
                 code = 2
 
             self.publish.send_pyobj(("START", bpod_id, code))
+            self.cfg["bpod_status"][bpod_index] = (1, None, None, None)
 
         else:
             code = 0
@@ -456,21 +468,20 @@ class BpodAcademyServer:
         else:
             return None
 
-    def _query_bpod_protocol(self, bpod_id):
+    def _query_bpod_status(self, bpod_id):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
         if self.bpod_process[bpod_index] is not None:
             res = self.bpod_process[bpod_index].send_command(("QUERY",))
             if res[0] == "QUERY":
                 if res[1]:
-                    return 2
+                    return (2, res[2], res[3], res[4])
                 else:
-                    return 1
+                    return (1,)
             else:
                 return None
         else:
-            return 0
-            
+            return (0,)
 
     def _stop_bpod_protocol(self, bpod_id):
 

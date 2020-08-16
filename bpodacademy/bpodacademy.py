@@ -14,6 +14,7 @@ from tkinter.ttk import Combobox
 
 import os
 from pathlib import Path
+import platform
 import shutil
 
 import csv
@@ -38,8 +39,9 @@ class BpodAcademy(Tk):
     FRAMES_PER_COLUMN = 5
     INTER_COLUMN_WIDTH = 3
 
-    ZMQ_CLIENT_RECV_TIMEO_MS = 10000
-    ZMQ_SUBSCRIBE_WAIT_MS = 10
+    ZMQ_REQUEST_RCVTIMEO_MS = 30000
+    ZMQ_CONNECT_TIMEO_MS = 1000
+    ZMQ_SUBSCRIBE_RCVTIMEO_MS = 1
     ZMQ_SUBSCRIBE_FREQUENCY_MS = 100
 
     ### Utility functions ###
@@ -60,9 +62,12 @@ class BpodAcademy(Tk):
     def __init__(self, remote=False, ip="*", port=5555):
 
         Tk.__init__(self)
+        self.withdraw()
+
         self.remote = remote
         self.ip = ip if ip is not "*" else "localhost"
         self.port = port
+        self.zmq_context = zmq.Context()
 
         ### if not remote, start server ###
         if not self.remote:
@@ -79,17 +84,27 @@ class BpodAcademy(Tk):
             # start sockets
             self._connect_remote_to_server()
 
+            # set window title
+            self.title("Bpod Academy")
+
         else:
+
+            self.title("Bpod Academy (Remote)")
+            if platform.system() == "Darwin":
+                self.resizable(False, False)
             self._connect_remote_to_server_window()
 
-
         # create window
-        self._create_window()
+        if hasattr(self, "cfg"):
+            self._create_window()
 
-        # start reading server commands
-        self.listen_to_server = self.after(
-            BpodAcademy.ZMQ_SUBSCRIBE_FREQUENCY_MS, self._listen_to_server
-        )
+            # start reading server commands
+            self.listen_to_server = self.after(
+                BpodAcademy.ZMQ_SUBSCRIBE_FREQUENCY_MS, self._listen_to_server
+            )
+
+            self.deiconify()
+            self.mainloop()
 
     def _set_bpod_directory(self):
 
@@ -120,45 +135,40 @@ class BpodAcademy(Tk):
         # request: submits requests to server
         # subscribe: receives commands from server
 
-        context = zmq.Context()
-
-        self.request = context.socket(zmq.REQ)
+        self.request = self.zmq_context.socket(zmq.REQ)
         self.request.connect(f"tcp://{self.ip}:{self.port}")
-        self.subscribe = context.socket(zmq.SUB)
-        self.subscribe.setsockopt(zmq.RCVTIMEO, BpodAcademy.ZMQ_SUBSCRIBE_WAIT_MS)
+
+        self.subscribe = self.zmq_context.socket(zmq.SUB)
+        self.subscribe.setsockopt(zmq.RCVTIMEO, BpodAcademy.ZMQ_SUBSCRIBE_RCVTIMEO_MS)
         self.subscribe.subscribe("")
         self.subscribe.connect(f"tcp://{self.ip}:{self.port+1}")
 
         # look for connection
-        reply = self._remote_to_server(("CONFIG",))
+        reply = self._remote_to_server(
+            ("CONFIG",), timeout=BpodAcademy.ZMQ_CONNECT_TIMEO_MS
+        )
 
         if not reply:
-            self._disconnect_remote()
-            if window:
-                messagebox.showerror(
-                    "Remote Not Connected",
-                    f"Remote failed to connect to server! Please ensure the ip address and port are correct and that the server is online.",
-                    parent=self,
-                )
-            else:
-                self._connect_remote_to_server_window()
+            # self._disconnect_remote()
+            messagebox.showerror(
+                "Remote Not Connected",
+                f"Remote failed to connect to server! Please ensure the IP address and port are correct and that the server is online.",
+                parent=self,
+            )
         else:
             self.cfg = reply
             if window is not None:
                 window.destroy()
-                if type(window) is Tk:
-                    window.quit()
+                window.quit()
 
     def _disconnect_remote(self):
 
         self.request.close()
-        self.request = None
         self.subscribe.close()
-        self.subscribe = None
 
     def _connect_remote_to_server_window(self):
 
-        connect_window = Tk()
+        connect_window = Toplevel(self)
         connect_window.title("Connect to BpodAcademy")
 
         ip_entry = StringVar(connect_window, value=self.ip)
@@ -181,18 +191,11 @@ class BpodAcademy(Tk):
             ),
         ).grid(sticky="nsew", row=2, column=1)
 
-        Button(connect_window, text="Close", command=connect_window.quit).grid(
-            sticky="nsew", row=3, column=1
-        )
+        connect_window.protocol("WM_DELETE_WINDOW", connect_window.quit)
 
         connect_window.mainloop()
 
     def _create_window(self):
-
-        if not self.remote:
-            self.title("Bpod Academy")
-        else:
-            self.title("Bpod Academy (Remote)")
 
         # create menu at top
 
@@ -238,7 +241,7 @@ class BpodAcademy(Tk):
 
         for i in range(len(self.cfg["bpod_ids"])):
 
-            self._add_box(self.cfg["bpod_ids"][i], self.cfg["serial_numbers"][i])
+            self._add_box(self.cfg["bpod_ids"][i], self.cfg["bpod_serials"][i])
 
         self.protocol("WM_DELETE_WINDOW", self._close_bpod_academy)
 
@@ -338,6 +341,9 @@ class BpodAcademy(Tk):
 
     def _remove_box_command(self, bpod_id, window=None):
 
+        if not bpod_id:
+            return
+
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
 
         if self.bpod_frames[bpod_index].status == 2:
@@ -372,13 +378,6 @@ class BpodAcademy(Tk):
                         f"Could not remove {bpod_id}. Please try again or double check server connnections.",
                     )
 
-                # box_index = self.cfg["ids"].index(bpod_id)
-                # self.cfg["ids"].pop(box_index)
-                # self.cfg["ports"].pop(box_index)
-                # self.bpod_status.pop(box_index)
-                # self.bpod_process.pop(box_index)
-                # self.check_protocol.pop(box_index)
-
             if window:
                 window.destroy()
 
@@ -386,7 +385,7 @@ class BpodAcademy(Tk):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
         self.cfg["bpod_ids"].pop(bpod_index)
-        self.cfg["serial_numbers"].pop(bpod_index)
+        self.cfg["bpod_serials"].pop(bpod_index)
         self.bpod_frames[bpod_index].destroy()
         self.bpod_frames.pop(bpod_index)
         self._redraw_grid()
@@ -760,7 +759,7 @@ class BpodAcademy(Tk):
     def _change_port(self, bpod_id, bpod_serial):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
-        self.cfg["serial_numbers"][bpod_index] = bpod_serial
+        self.cfg["bpod_serials"][bpod_index] = bpod_serial
         self.bpod_frames[bpod_index].serial_number.set(bpod_serial)
 
     def _start_bpod(self, bpod_id, code):
@@ -769,7 +768,7 @@ class BpodAcademy(Tk):
         self.bpod_frames[bpod_index].start_bpod(code)
 
     def _end_bpod(self, bpod_id):
-        
+
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
         self.bpod_frames[bpod_index].end_bpod()
 
@@ -793,13 +792,13 @@ class BpodAcademy(Tk):
         if cmd is not None:
 
             if cmd[0] == "BPOD":
-                
+
                 if cmd[1] == "ADD":
 
                     bpod_id = cmd[2]
                     bpod_serial = cmd[3]
                     self.cfg["bpod_ids"].append(bpod_id)
-                    self.cfg["serial_numbers"].append(bpod_serial)
+                    self.cfg["bpod_serials"].append(bpod_serial)
                     self._add_box(bpod_id, bpod_serial)
 
                 elif cmd[1] == "REMOVE":
@@ -842,14 +841,22 @@ class BpodAcademy(Tk):
                 bpod_id = cmd[1]
                 self._end_bpod(bpod_id)
 
+            elif cmd[0] == "CLOSE":
+
+                messagebox.showwarning(
+                    "Server Closed!",
+                    "The BpodAcademy server has shut down. Please restart the server if you wish to run BpodAcademy.",
+                )
+
         self.listen_to_server = self.after(
             BpodAcademy.ZMQ_SUBSCRIBE_FREQUENCY_MS, self._listen_to_server
         )
 
-    def _remote_to_server(self, msg):
+    def _remote_to_server(self, msg, timeout=ZMQ_REQUEST_RCVTIMEO_MS):
 
         if self.request is not None:
 
+            self.request.setsockopt(zmq.RCVTIMEO, timeout)
             self.request.send_pyobj(msg)
 
             try:
@@ -865,9 +872,7 @@ class BpodAcademy(Tk):
 
         if self.remote:
 
-            self.request.close()
-            self.subscribe.close()
-
+            self._disconnect_remote()
             self.quit()
 
         else:
@@ -889,7 +894,9 @@ class BpodAcademy(Tk):
 
                     closing_window = Toplevel(self)
                     closing_window.title("Closing Bpods")
-                    Label(closing_window, text="Closing open Bpods. Please wait...").pack()
+                    Label(
+                        closing_window, text="Closing open Bpods. Please wait..."
+                    ).pack()
                     closing_window.update()
 
                     ### Close open Bpods ###
@@ -897,22 +904,28 @@ class BpodAcademy(Tk):
                         if self.bpod_frames[i].status > 0:
                             self.bpod_frames[i]._end_bpod()
 
+                    ### Close BpodAcademy server ###
+                    self._remote_to_server(("CLOSE",))
+                    self.server.stop()
+                    self.server.close()
+
                     closing_window.destroy()
 
                     ### close BpodAcademy ###
                     self.quit()
 
+
 def main():
 
     import argparse
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('-r', '--remote', action="store_true")
-    parser.add_argument('-i', '--ip', type=str, default='*')
-    parser.add_argument('-p', '--port', type=int, default=5555)
+    parser.add_argument("-r", "--remote", action="store_true")
+    parser.add_argument("-i", "--ip", type=str, default="*")
+    parser.add_argument("-p", "--port", type=int, default=5555)
     args = parser.parse_args()
 
-    bpodacademy = BpodAcademy(remote=args.remote, ip=args.ip, port=args.port)
-    bpodacademy.mainloop()
+    BpodAcademy(remote=args.remote, ip=args.ip, port=args.port)
 
 
 if __name__ == "__main__":
