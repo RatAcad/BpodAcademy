@@ -16,11 +16,8 @@ import os
 from pathlib import Path
 import platform
 import shutil
-
 import csv
-import serial.tools.list_ports as list_ports
 from scipy.io import savemat
-import ipaddress
 import zmq
 
 from bpodacademy.exception import BpodAcademyError
@@ -43,19 +40,6 @@ class BpodAcademy(Tk):
     ZMQ_CONNECT_TIMEO_MS = 1000
     ZMQ_SUBSCRIBE_RCVTIMEO_MS = 1
     ZMQ_SUBSCRIBE_FREQUENCY_MS = 100
-
-    ### Utility functions ###
-
-    @staticmethod
-    def _get_bpod_ports():
-
-        com_ports = list_ports.comports()
-        bpod_ports = [
-            (p.serial_number, p.device)
-            for p in com_ports
-            if p.manufacturer is not None and "duino" in p.manufacturer
-        ]
-        return bpod_ports
 
     ### Object methods ###
 

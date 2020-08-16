@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import ttk
 import os
 import zmq
-
 import serial.tools.list_ports as list_ports
 
 from bpodacademy import BpodAcademyError
