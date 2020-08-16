@@ -2,8 +2,6 @@
 
 BpodAcademy is a python package that provides a Tkinter based GUI to control multiple instances of the Bpod control software (Matlab-based, see [https://github.com/sanworks/Bpod_Gen2](https://github.com/sanworks/Bpod_Gen2)). BpodAcademy can also be run *remotely* -- users can run Bpod protocols on multiple Bpod devices from home!
 
-BpodAcademy controls each instance of the Matlab-based Bpod directly using [Mathwork's Matlab Engine for Python](https://www.mathworks.com/help/matlab/matlab-engine-for-python.html).
-
 ### Design
 
 Each instance of the Matlab-based Bpod software is controlled from python using [Mathwork's Matlab Engine for Python](https://www.mathworks.com/help/matlab/matlab-engine-for-python.html). For each Bpod device, BpodAcademy opens a *Bpod Process Manager* that organizes the Matlab engine associated with the Bpod device and directly calls the Matlab Bpod control software.
