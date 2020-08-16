@@ -11,22 +11,21 @@ import matlab.engine
 import io
 
 
-# Define Constants
-
-WAIT_START_PROCESS_SEC = 30
-WAIT_EXEC_COMMAND_SEC = 10
-WAIT_START_PROTOCOL_SEC = 1
-WAIT_KILL_PROTOCOL_SEC = 10
-WAIT_KILL_PROCESS_SEC = 10
-SAVE_LOG_SEC = 1
-
-
 class BpodProcess:
     """BpodProcess Class
 
         Controls individual instances of matlab.engine in background processes,
         using the multiprocess package.
     """
+
+    # Define Constants
+
+    WAIT_START_PROCESS_SEC = 30
+    WAIT_EXEC_COMMAND_SEC = 10
+    WAIT_START_PROTOCOL_SEC = 1
+    WAIT_KILL_PROTOCOL_SEC = 10
+    WAIT_KILL_PROCESS_SEC = 10
+    SAVE_LOG_SEC = 1
 
     # Utility Functions
 
@@ -53,10 +52,11 @@ class BpodProcess:
 
         self.id = id
         self.serial_port = serial_port
-        self.ctx = mp.get_context("spawn")
+        self.ctx = mp.get_context("fork")
         self.log_dir = (
             Path(log_dir) if log_dir is not None else Path("~/logs").expanduser()
         )
+        self.protocol_details = None
 
     def _write_to_log(self, note=""):
 
@@ -67,20 +67,20 @@ class BpodProcess:
     def _log_to_file(self):
 
         # get log content
-        new_content = self.stdout.getvalue()
+        new_content_stdout = self.stdout.getvalue()
 
         # flush contents from log
         self.stdout.truncate(0)
         self.stdout.seek(0)
 
         # write contents to file
-        self.log_file.write(new_content)
+        self.log_file.write(new_content_stdout)
         self.log_file.flush()
 
     def _write_log_on_thread(self):
 
         while self.write_log:
-            time.sleep(SAVE_LOG_SEC)
+            time.sleep(BpodProcess.SAVE_LOG_SEC)
             self._log_to_file()
 
     def _open_log_thread(self):
@@ -170,6 +170,8 @@ class BpodProcess:
                 f"starting protocol = {protocol}, subject = {subject}, settings = {settings}",
             )
 
+            self.protocol_details = (protocol, subject, settings)
+
             self.protocol_thread = kthread.KThread(
                 target=self._run_protocol_on_thread,
                 args=(protocol, subject, settings),
@@ -179,7 +181,7 @@ class BpodProcess:
             self.protocol_thread.start()
 
             # wait to see if protocol starts successfully
-            time.sleep(WAIT_START_PROTOCOL_SEC)
+            time.sleep(BpodProcess.WAIT_START_PROTOCOL_SEC)
 
             if self.protocol_thread.is_alive():
                 return 1
@@ -202,12 +204,12 @@ class BpodProcess:
             stderr=self.stdout,
         )
 
-    def _query_protocol(self):
+    def _query_status(self):
 
         if (self.protocol_thread is not None) and (self.protocol_thread.is_alive()):
-            return True
+            return (True,) + self.protocol_details
         else:
-            return False
+            return (False,)
 
     def _stop_protocol(self):
 
@@ -215,22 +217,19 @@ class BpodProcess:
 
             if self.protocol_thread.is_alive():
 
-                self._write_to_log("stopping protocol...")
+                self._write_to_log("manually stopping protocol...")
                 self.protocol_thread.raise_exc(KeyboardInterrupt)
-                #self.protocol_thread.terminate()
 
                 # wait for thread to complete after termination signal
-                self.protocol_thread.join(timeout=WAIT_KILL_PROTOCOL_SEC)
-                if not self.protocol_thread.is_alive():
-                    self.protocol_thread = None
-                    self._write_to_log("protocol ended")
-                    return 1
-                else:
+                self.protocol_thread.join(timeout=BpodProcess.WAIT_KILL_PROTOCOL_SEC)
+
+                if self.protocol_thread.is_alive():
                     return -1
 
-            else:
-
-                return 2
+            self.protocol_details = None
+            self.protocol_thread = None
+            self._write_to_log("protocol ended")
+            return 1
 
         else:
 
@@ -305,8 +304,8 @@ class BpodProcess:
             # check if protocol is running
             elif cmd == "QUERY":
 
-                code = self._query_protocol()
-                self.q_to_main.put(("QUERY", code))
+                code = self._query_status()
+                self.q_to_main.put(("QUERY",) + code)
 
     def _run_process(self):
 

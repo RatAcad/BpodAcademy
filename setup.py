@@ -13,7 +13,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/gkane26/BpodAcademy",
     packages=setuptools.find_packages(),
-    install_requires=['pyserial', 'scipy', 'multiprocess', 'kthread'],
+    install_requires=['pyserial', 'scipy', 'multiprocess', 'kthread', 'pyzmq'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU General Public License v3 (GPL-3)",
