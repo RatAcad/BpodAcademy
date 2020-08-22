@@ -139,11 +139,11 @@ class BpodProcess:
                 stderr=self.stdout,
             )
 
-            return True
+            return 1
 
         else:
 
-            return False
+            return 0
 
     def _calibrate_bpod(self):
 
@@ -156,11 +156,11 @@ class BpodProcess:
                 "Calibrate", nargout=0, stdout=self.stdout, stderr=self.stdout,
             )
 
-            return True
+            return 1
 
         else:
 
-            return False
+            return 0
 
     def _start_protocol(self, protocol, subject, settings):
 
@@ -186,11 +186,11 @@ class BpodProcess:
             if self.protocol_thread.is_alive():
                 return 1
             else:
-                return -1
+                return 0
 
         else:
 
-            return 0
+            return 2
 
     def _run_protocol_on_thread(self, protocol, subject, settings):
 
@@ -207,9 +207,9 @@ class BpodProcess:
     def _query_status(self):
 
         if (self.protocol_thread is not None) and (self.protocol_thread.is_alive()):
-            return (True,) + self.protocol_details
+            return (1,) + self.protocol_details
         else:
-            return (False,)
+            return (0,)
 
     def _stop_protocol(self):
 
@@ -224,7 +224,7 @@ class BpodProcess:
                 self.protocol_thread.join(timeout=BpodProcess.WAIT_KILL_PROTOCOL_SEC)
 
                 if self.protocol_thread.is_alive():
-                    return -1
+                    return 2
 
             self.protocol_details = None
             self.protocol_thread = None
@@ -247,11 +247,11 @@ class BpodProcess:
             self._write_to_log("exit matlab")
             self.eng.exit()
 
-            return True
+            return 1
 
         else:
 
-            return False
+            return 0
 
     def _process_academy_commands(self):
 
@@ -351,12 +351,18 @@ class BpodProcess:
 
         if cmd is not None:
 
-            self.q_to_proc.put(cmd)
+            if self.proc.is_alive():
 
-            try:
-                result = self.q_to_main.get(timeout=timeout)
-            except Empty:
-                pass
+                self.q_to_proc.put(cmd)
+
+                try:
+                    result = self.q_to_main.get(timeout=timeout)
+                except Empty:
+                    pass
+
+            else:
+
+                result = cmd + (-1,)
 
         return result
 

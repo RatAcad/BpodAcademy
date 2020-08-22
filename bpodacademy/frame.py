@@ -315,7 +315,7 @@ class BpodFrame(tk.Frame):
 
             if reply is None:
                 self._no_server_message("GUI")
-            elif reply:
+            elif reply == 1:
                 self.switch_gui_button["text"] = (
                     "Hide GUI"
                     if self.switch_gui_button["text"] == "Show GUI"
@@ -351,7 +351,7 @@ class BpodFrame(tk.Frame):
             reply = self._remote_to_server(("CALIBRATE", self.bpod_id))
             if reply is None:
                 self._no_server_message("CALIBRATE")
-            elif not reply:
+            elif reply <= 0:
                 tk.messagebox.showerror(
                     "Calibration Error!",
                     f"There was an error trying to display the Calibration window for {self.bpod_id}",
@@ -403,6 +403,12 @@ class BpodFrame(tk.Frame):
                     tk.messagebox.showwarning(
                         "Protocol did not start!",
                         f"Protocol failed to start on {self.bpod_id}! Please check the log for error messages.",
+                        parent=self,
+                    )
+                elif reply == 2:
+                    tk.messagebox.showwarning(
+                        "Protocol did not start!",
+                        f"Protocol failed to start on {self.bpod_id}! Please check if a protocol is currently running.",
                         parent=self,
                     )
 
@@ -458,7 +464,7 @@ class BpodFrame(tk.Frame):
 
             if reply is None:
                 self._no_server_message("STOP")
-            elif reply < 0:
+            elif reply == 2:
                 tk.messagebox.showwarning(
                     "Protocol still runnning!",
                     f"Failed to stop protocol on {self.bpod_id}, please try again in a few seconds.",

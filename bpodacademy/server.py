@@ -437,7 +437,7 @@ class BpodAcademyServer:
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
 
         res = self.bpod_process[bpod_index].send_command(("GUI",))
-        if res[0] == "GUI":
+        if (res is not None) and (res[0] == "GUI"):
             return res[1]
         else:
             return None
@@ -447,7 +447,7 @@ class BpodAcademyServer:
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
 
         res = self.bpod_process[bpod_index].send_command(("CALIBRATE",))
-        if res[0] == "CALIBRATE":
+        if (res is not None) and (res[0] == "CALIBRATE"):
             return res[1]
         else:
             return None
@@ -461,8 +461,8 @@ class BpodAcademyServer:
             ("RUN", protocol, subject, settings)
         )
 
-        if res[0] == "RUN":
-            if res[1] > 0:
+        if (res is not None) and (res[0] == "RUN"):
+            if res[1] == 1:
                 self.publish.send_pyobj(("RUN", bpod_id, protocol, subject, settings))
             return res[1]
         else:
@@ -471,9 +471,10 @@ class BpodAcademyServer:
     def _query_bpod_status(self, bpod_id):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
+
         if self.bpod_process[bpod_index] is not None:
             res = self.bpod_process[bpod_index].send_command(("QUERY",))
-            if res[0] == "QUERY":
+            if (res is not None) and (res[0] == "QUERY"):
                 if res[1]:
                     return (2, res[2], res[3], res[4])
                 else:
@@ -507,4 +508,3 @@ class BpodAcademyServer:
             return res[1]
         else:
             return None
-
