@@ -490,7 +490,7 @@ class BpodAcademyServer:
 
         res = self.bpod_process[bpod_index].send_command(("STOP",))
 
-        if res[0] == "STOP":
+        if (res is not None) and (res[0] == "STOP"):
             if res[1] == 1:
                 self.publish.send_pyobj(("STOP", bpod_id))
             return res[1]
@@ -503,7 +503,7 @@ class BpodAcademyServer:
 
         res = self.bpod_process[bpod_index].send_command(("END",))
 
-        if res[0] == "END":
+        if (res is not None) and (res[0] == "END"):
             self.publish.send_pyobj(("END", bpod_id))
             return res[1]
         else:
