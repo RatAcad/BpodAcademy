@@ -52,7 +52,7 @@ class BpodProcess:
 
         self.id = id
         self.serial_port = serial_port
-        self.ctx = mp.get_context("fork")
+        self.ctx = mp.get_context("spawn")
         self.log_dir = (
             Path(log_dir) if log_dir is not None else Path("~/logs").expanduser()
         )

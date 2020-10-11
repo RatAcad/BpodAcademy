@@ -6,6 +6,7 @@ import threading
 import csv
 from scipy.io import savemat
 import shutil
+import traceback
 
 from bpodacademy.exception import BpodAcademyError
 from bpodacademy.process import BpodProcess
@@ -102,159 +103,170 @@ class BpodAcademyServer:
             except zmq.Again:
                 cmd = None
 
-            if cmd is not None:
+            try:
 
-                if cmd[0] == "CONFIG":
+                if cmd is not None:
 
-                    self.reply.send_pyobj(self.cfg)
+                    if cmd[0] == "CONFIG":
 
-                elif cmd[0] == "PORTS":
+                        self.reply.send_pyobj(self.cfg)
 
-                    self.reply.send_pyobj(BpodAcademyServer._get_bpod_ports())
+                    elif cmd[0] == "PORTS":
 
-                elif cmd[0] == "PROTOCOLS":
+                        self.reply.send_pyobj(BpodAcademyServer._get_bpod_ports())
 
-                    if len(cmd) == 1:
-                        self.reply.send_pyobj(self._load_protocols())
+                    elif cmd[0] == "PROTOCOLS":
 
-                    elif cmd[1] == "REFRESH":
+                        if len(cmd) == 1:
+                            self.reply.send_pyobj(self._load_protocols())
+
+                        elif cmd[1] == "REFRESH":
+                            self.reply.send_pyobj(True)
+                            self.publish.send_pyobj(
+                                ("PROTOCOLS", self._load_protocols())
+                            )
+
+                    elif cmd[0] == "SUBJECTS":
+
+                        if cmd[1] == "FETCH":
+                            protocol = cmd[2]
+                            self.reply.send_pyobj(self._load_subjects(protocol))
+
+                        elif cmd[1] == "ADD":
+                            protocol = cmd[2]
+                            subject = cmd[3]
+                            res = self._add_subject(protocol, subject)
+                            self.reply.send_pyobj(res)
+
+                    elif cmd[0] == "SETTINGS":
+
+                        if cmd[1] == "FETCH":
+                            protocol = cmd[2]
+                            subject = cmd[3]
+                            self.reply.send_pyobj(
+                                self._load_settings(protocol, subject)
+                            )
+
+                        elif cmd[1] == "COPY":
+                            from_protocol = cmd[2]
+                            from_subject = cmd[3]
+                            from_settings = cmd[4]
+                            to_protocol = cmd[5]
+                            to_subject = cmd[6]
+                            res = self._copy_settings(
+                                from_protocol,
+                                from_subject,
+                                from_settings,
+                                to_protocol,
+                                to_subject,
+                            )
+                            self.reply.send_pyobj(res)
+
+                        elif cmd[1] == "CREATE":
+
+                            protocol = cmd[2]
+                            subject = cmd[3]
+                            settings_file = cmd[4]
+                            settings_dict = cmd[5]
+                            res = self._create_settings_file(
+                                protocol, subject, settings_file, settings_dict
+                            )
+                            self.reply.send_pyobj(res)
+
+                    elif cmd[0] == "LOGS":
+
+                        if cmd[1] == "DELETE":
+
+                            res = self._delete_logs()
+                            self.reply.send_pyobj(res)
+
+                    elif cmd[0] == "BPOD":
+
+                        if cmd[1] == "ADD":
+
+                            bpod_id = cmd[2]
+                            bpod_serial = cmd[3]
+                            res = self._add_box(bpod_id, bpod_serial)
+                            self.reply.send_pyobj(res)
+
+                        if cmd[1] == "REMOVE":
+
+                            bpod_id = cmd[2]
+                            res = self._remove_box(bpod_id)
+                            self.reply.send_pyobj(res)
+
+                        if cmd[1] == "CHANGE_PORT":
+
+                            bpod_id = cmd[2]
+                            bpod_serial = cmd[3]
+                            res = self._change_port(bpod_id, bpod_serial)
+                            self.reply.send_pyobj(res)
+
+                            bpod_cfg_index = self.cfg["bpod_ids"].index(bpod_id)
+                            self.cfg["bpod_serials"][bpod_cfg_index] = bpod_serial
+                            self._save_config()
+                            self.publish.send_pyobj(cmd)
+
+                    elif cmd[0] == "START":
+
+                        bpod_id = cmd[1]
+                        res = self._start_bpod(bpod_id)
+                        self.reply.send_pyobj(res)
+
+                    elif cmd[0] == "GUI":
+
+                        bpod_id = cmd[1]
+                        res = self._switch_bpod_gui(bpod_id)
+                        self.reply.send_pyobj(res)
+
+                    elif cmd[0] == "CALIBRATE":
+
+                        bpod_id = cmd[1]
+                        res = self._calibrate_bpod(bpod_id)
+                        self.reply.send_pyobj(res)
+
+                    elif cmd[0] == "RUN":
+
+                        bpod_id = cmd[1]
+                        protocol = cmd[2]
+                        subject = cmd[3]
+                        settings = cmd[4]
+                        res = self._start_bpod_protocol(
+                            bpod_id, protocol, subject, settings
+                        )
+                        self.reply.send_pyobj(res)
+
+                    elif cmd[0] == "QUERY":
+
+                        bpod_id = cmd[1]
+                        res = self._query_bpod_status(bpod_id)
+                        self.reply.send_pyobj(res)
+
+                    elif cmd[0] == "STOP":
+
+                        bpod_id = cmd[1]
+                        res = self._stop_bpod_protocol(bpod_id)
+                        self.reply.send_pyobj(res)
+
+                    elif cmd[0] == "END":
+
+                        bpod_id = cmd[1]
+                        res = self._end_bpod(bpod_id)
+                        self.reply.send_pyobj(res)
+
+                    elif cmd[0] == "CLOSE":
+
+                        self.publish.send_pyobj(("CLOSE",))
                         self.reply.send_pyobj(True)
-                        self.publish.send_pyobj(("PROTOCOLS", self._load_protocols()))
 
-                elif cmd[0] == "SUBJECTS":
+                    else:
 
-                    if cmd[1] == "FETCH":
-                        protocol = cmd[2]
-                        self.reply.send_pyobj(self._load_subjects(protocol))
+                        raise BpodAcademyError(f"Command = {cmd} is not implemented!")
 
-                    elif cmd[1] == "ADD":
-                        protocol = cmd[2]
-                        subject = cmd[3]
-                        res = self._add_subject(protocol, subject)
-                        self.reply.send_pyobj(res)
+            except Exception:
 
-                elif cmd[0] == "SETTINGS":
-
-                    if cmd[1] == "FETCH":
-                        protocol = cmd[2]
-                        subject = cmd[3]
-                        self.reply.send_pyobj(self._load_settings(protocol, subject))
-
-                    elif cmd[1] == "COPY":
-                        from_protocol = cmd[2]
-                        from_subject = cmd[3]
-                        from_settings = cmd[4]
-                        to_protocol = cmd[5]
-                        to_subject = cmd[6]
-                        res = self._copy_settings(
-                            from_protocol,
-                            from_subject,
-                            from_settings,
-                            to_protocol,
-                            to_subject,
-                        )
-                        self.reply.send_pyobj(res)
-
-                    elif cmd[1] == "CREATE":
-
-                        protocol = cmd[2]
-                        subject = cmd[3]
-                        settings_file = cmd[4]
-                        settings_dict = cmd[5]
-                        res = self._create_settings_file(
-                            protocol, subject, settings_file, settings_dict
-                        )
-                        self.reply.send_pyobj(res)
-
-                elif cmd[0] == "LOGS":
-
-                    if cmd[1] == "DELETE":
-
-                        res = self._delete_logs()
-                        self.reply.send_pyobj(res)
-
-                elif cmd[0] == "BPOD":
-
-                    if cmd[1] == "ADD":
-
-                        bpod_id = cmd[2]
-                        bpod_serial = cmd[3]
-                        res = self._add_box(bpod_id, bpod_serial)
-                        self.reply.send_pyobj(res)
-
-                    if cmd[1] == "REMOVE":
-
-                        bpod_id = cmd[2]
-                        res = self._remove_box(bpod_id)
-                        self.reply.send_pyobj(res)
-
-                    if cmd[1] == "CHANGE_PORT":
-
-                        bpod_id = cmd[2]
-                        bpod_serial = cmd[3]
-                        res = self._change_port(bpod_id, bpod_serial)
-                        self.reply.send_pyobj(res)
-
-                        bpod_cfg_index = self.cfg["bpod_ids"].index(bpod_id)
-                        self.cfg["bpod_serials"][bpod_cfg_index] = bpod_serial
-                        self._save_config()
-                        self.publish.send_pyobj(cmd)
-
-                elif cmd[0] == "START":
-
-                    bpod_id = cmd[1]
-                    res = self._start_bpod(bpod_id)
-                    self.reply.send_pyobj(res)
-
-                elif cmd[0] == "GUI":
-
-                    bpod_id = cmd[1]
-                    res = self._switch_bpod_gui(bpod_id)
-                    self.reply.send_pyobj(res)
-
-                elif cmd[0] == "CALIBRATE":
-
-                    bpod_id = cmd[1]
-                    res = self._calibrate_bpod(bpod_id)
-                    self.reply.send_pyobj(res)
-
-                elif cmd[0] == "RUN":
-
-                    bpod_id = cmd[1]
-                    protocol = cmd[2]
-                    subject = cmd[3]
-                    settings = cmd[4]
-                    res = self._start_bpod_protocol(
-                        bpod_id, protocol, subject, settings
-                    )
-                    self.reply.send_pyobj(res)
-
-                elif cmd[0] == "QUERY":
-
-                    bpod_id = cmd[1]
-                    res = self._query_bpod_status(bpod_id)
-                    self.reply.send_pyobj(res)
-
-                elif cmd[0] == "STOP":
-
-                    bpod_id = cmd[1]
-                    res = self._stop_bpod_protocol(bpod_id)
-                    self.reply.send_pyobj(res)
-
-                elif cmd[0] == "END":
-
-                    bpod_id = cmd[1]
-                    res = self._end_bpod(bpod_id)
-                    self.reply.send_pyobj(res)
-
-                elif cmd[0] == "CLOSE":
-
-                    self.publish.send_pyobj(("CLOSE",))
-                    self.reply.send_pyobj(True)
-
-                else:
-
-                    self.reply.send_pyobj(None)
+                self.reply.send_pyobj(None)
+                traceback.print_exc()
 
     def stop(self):
 
@@ -356,6 +368,7 @@ class BpodAcademyServer:
 
             self.cfg["bpod_ids"].append(bpod_id)
             self.cfg["bpod_serials"].append(bpod_serial)
+            self.cfg["bpod_status"].append(0)
             self.bpod_process.append(None)
             self._save_config()
             self.publish.send_pyobj(("BPOD", "ADD", bpod_id, bpod_serial))
