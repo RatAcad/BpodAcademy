@@ -29,9 +29,6 @@ class BpodAcademy(Tk):
 
     ### Define constants used in GUI ###
 
-    OFF_COLOR = "light salmon"
-    READY_COLOR = "light goldenrod"
-    ON_COLOR = "pale green"
     GRID_WIDTH = 15
     FRAMES_PER_COLUMN = 5
     INTER_COLUMN_WIDTH = 3

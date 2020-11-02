@@ -11,9 +11,9 @@ class BpodFrame(tk.Frame):
 
     ### Define constants used in GUI ###
 
-    OFF_COLOR = "light salmon"
-    READY_COLOR = "light goldenrod"
-    ON_COLOR = "pale green"
+    OFF_COLOR = "sky blue"
+    READY_COLOR = "chartreuse3"
+    ON_COLOR = "light goldenrod"
     GRID_WIDTH = 15
     CHECK_PROTOCOL_MS = 1000
     CHECK_SERVER_COMMANDS_MS = 1000
