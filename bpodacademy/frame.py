@@ -36,7 +36,7 @@ class BpodFrame(tk.Frame):
 
         self.bpod_id = bpod_id
         self.serial_number = tk.StringVar(self, value=serial_number)
-        self.status = status[0]
+        self.status = status[0] if status is not None else 0
         if self.status == 2:
             self.protocol_details = (status[1], status[2], status[3])
             self.check_protocol = self.after(

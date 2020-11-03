@@ -30,7 +30,7 @@ class BpodAcademy(Tk):
     ### Define constants used in GUI ###
 
     GRID_WIDTH = 15
-    FRAMES_PER_COLUMN = 5
+    FRAMES_PER_ROW = 3
     INTER_COLUMN_WIDTH = 3
 
     ZMQ_REQUEST_RCVTIMEO_MS = 30000
@@ -243,12 +243,12 @@ class BpodAcademy(Tk):
         )
 
         index = len(self.bpod_frames) - 1
-        row = 2 * (1 + (index % BpodAcademy.FRAMES_PER_COLUMN)) - 1
-        col = 2 * int(index / BpodAcademy.FRAMES_PER_COLUMN)
+        col = 2 * (index % BpodAcademy.FRAMES_PER_ROW)
+        row = 2 * int(index / BpodAcademy.FRAMES_PER_ROW)
 
-        if (index > 0) and (index % BpodAcademy.FRAMES_PER_COLUMN == 0):
+        if (row == 0) and (col > 0):
             Label(self, width=BpodAcademy.INTER_COLUMN_WIDTH).grid(
-                row=0, column=(2 * int(index / 5) - 1)
+                row=0, column=col-1
             )
         self.bpod_frames[index].grid(row=row, column=col)
         Label(self).grid(row=row + 1, column=col)
