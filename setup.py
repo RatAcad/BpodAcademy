@@ -19,6 +19,7 @@ setuptools.setup(
         "License :: OSI Approved :: GNU General Public License v3 (GPL-3)",
         "Operating System :: OS Independent",
     ],
-    entry_points={'console_scripts' : ['bpodacademy=bpodacademy.bpodacademy:main']},
+    entry_points={'console_scripts' : ['bpodacademy=bpodacademy.bpodacademy:main',
+                                       'bpodacademy-server=bpodacademy.server:main']},
     python_requires='>=3.6',
 )

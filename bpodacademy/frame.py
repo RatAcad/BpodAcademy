@@ -272,7 +272,7 @@ class BpodFrame(tk.Frame):
             tk.Label(wait_dialog, text="Please wait...").pack()
             wait_dialog.update()
 
-            reply = self._remote_to_server(("START", self.bpod_id))
+            reply = self._remote_to_server(("BPOD", "START", self.bpod_id))
             if reply is None:
                 self._no_server_message("START")
 
@@ -311,7 +311,7 @@ class BpodFrame(tk.Frame):
 
         else:
 
-            reply = self._remote_to_server(("GUI", self.bpod_id))
+            reply = self._remote_to_server(("BPOD", "GUI", self.bpod_id))
 
             if reply is None:
                 self._no_server_message("GUI")
@@ -348,7 +348,7 @@ class BpodFrame(tk.Frame):
 
         else:
 
-            reply = self._remote_to_server(("CALIBRATE", self.bpod_id))
+            reply = self._remote_to_server(("BPOD", "CALIBRATE", self.bpod_id))
             if reply is None:
                 self._no_server_message("CALIBRATE")
             elif reply <= 0:
@@ -389,6 +389,7 @@ class BpodFrame(tk.Frame):
 
                 reply = self._remote_to_server(
                     (
+                        "BPOD",
                         "RUN",
                         self.bpod_id,
                         self.protocol.get(),
@@ -430,7 +431,7 @@ class BpodFrame(tk.Frame):
 
         if self.status == 2:
 
-            reply = self._remote_to_server(("QUERY", self.bpod_id))
+            reply = self._remote_to_server(("BPOD", "QUERY", self.bpod_id))
 
             if reply is None:
                 self._no_server_message("QUERY")
@@ -460,7 +461,7 @@ class BpodFrame(tk.Frame):
 
         else:
 
-            reply = self._remote_to_server(("STOP", self.bpod_id))
+            reply = self._remote_to_server(("BPOD", "STOP", self.bpod_id))
 
             if reply is None:
                 self._no_server_message("STOP")
@@ -492,7 +493,7 @@ class BpodFrame(tk.Frame):
 
         elif self.status == 1:
 
-            reply = self._remote_to_server(("END", self.bpod_id))
+            reply = self._remote_to_server(("BPOD", "END", self.bpod_id))
 
             if reply is None:
                 self._no_server_message("END")
