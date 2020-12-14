@@ -67,17 +67,17 @@ class BpodAcademy(Tk):
                 self.server = BpodAcademyServer(self.bpod_dir, ip, port)
                 self.server.start()
 
-
             # set window title
             self.title("Bpod Academy")
+            self._connect_remote_to_server()
 
         else:
 
             self.title("Bpod Academy (Remote)")
+            self._connect_remote_to_server_window()
         
         if platform.system() == "Darwin":
             self.resizable(False, False)
-        self._connect_remote_to_server_window()
 
         # create window
         if hasattr(self, "cfg"):
@@ -918,7 +918,7 @@ class BpodAcademy(Tk):
                 closing_window.destroy()
 
                 ### close BpodAcademy ###
-                # self.quit()
+                self.quit()
 
 
 def main():
