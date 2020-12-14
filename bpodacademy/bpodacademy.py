@@ -58,12 +58,15 @@ class BpodAcademy(Tk):
             if self.bpod_dir is None:
                 self._set_bpod_directory()
 
-            # start server
-            self.server = BpodAcademyServer(self.bpod_dir, ip, port)
-            self.server.start()
+            # check for server connection
+            cfg = self._connect_remote_to_server(test=True)
 
-            # start sockets
-            self._connect_remote_to_server()
+            if not cfg:
+
+                # start server
+                self.server = BpodAcademyServer(self.bpod_dir, ip, port)
+                self.server.start()
+
 
             # set window title
             self.title("Bpod Academy")
@@ -71,9 +74,10 @@ class BpodAcademy(Tk):
         else:
 
             self.title("Bpod Academy (Remote)")
-            if platform.system() == "Darwin":
-                self.resizable(False, False)
-            self._connect_remote_to_server_window()
+        
+        if platform.system() == "Darwin":
+            self.resizable(False, False)
+        self._connect_remote_to_server_window()
 
         # create window
         if hasattr(self, "cfg"):
@@ -107,7 +111,7 @@ class BpodAcademy(Tk):
         if not self.bpod_dir:
             self.quit()
 
-    def _connect_remote_to_server(self, ip=None, port=None, window=None):
+    def _connect_remote_to_server(self, ip=None, port=None, window=None, test=False):
 
         self.ip = ip if ip is not None else self.ip
         self.port = port if port is not None else self.port
@@ -125,22 +129,23 @@ class BpodAcademy(Tk):
         self.subscribe.connect(f"tcp://{self.ip}:{self.port+1}")
 
         # look for connection
-        reply = self._remote_to_server(
-            ("CONFIG",), timeout=BpodAcademy.ZMQ_CONNECT_TIMEO_MS
-        )
+        reply = self._remote_to_server(("CONFIG",), timeout=1000)
 
-        if not reply:
-            # self._disconnect_remote()
-            messagebox.showerror(
-                "Remote Not Connected",
-                f"Remote failed to connect to server! Please ensure the IP address and port are correct and that the server is online.",
-                parent=self,
-            )
+        if test:
+            return reply
         else:
-            self.cfg = reply
-            if window is not None:
-                window.destroy()
-                window.quit()
+            if not reply:
+                # self._disconnect_remote()
+                messagebox.showerror(
+                    "Remote Not Connected",
+                    f"Remote failed to connect to server! Please ensure the IP address and port are correct and that the server is online.",
+                    parent=self,
+                )
+            else:
+                self.cfg = reply
+                if window is not None:
+                    window.destroy()
+                    window.quit()
 
     def _disconnect_remote(self):
 
@@ -212,6 +217,10 @@ class BpodAcademy(Tk):
         logs_menu.add_command(label="Delete Logs", command=self._delete_logs_command)
         menubar.add_cascade(label="Logs", menu=logs_menu)
 
+        server_menu = Menu(menubar, tearoff=0)
+        server_menu.add_command(label="Stop Server", command=self._close_server)
+        menubar.add_cascade(label="Server", menu=server_menu)
+
         self.config(menu=menubar)
 
         # create bpod frames for each box
@@ -222,13 +231,13 @@ class BpodAcademy(Tk):
 
         for i in range(len(self.cfg["bpod_ids"])):
 
-            self._add_box(self.cfg["bpod_ids"][i], self.cfg["bpod_serials"][i])
+            self._add_box(self.cfg["bpod_ids"][i], self.cfg["bpod_serials"][i], self.cfg["bpod_positions"][i])
 
         self.protocol("WM_DELETE_WINDOW", self._close_bpod_academy)
 
-    def _add_box(self, bpod_id, bpod_serial):
+    def _add_box(self, bpod_id, bpod_serial, position):
 
-        status = self._remote_to_server(("QUERY", bpod_id))
+        status = self._remote_to_server(("BPOD", "QUERY", bpod_id))
 
         self.bpod_frames.append(
             BpodFrame(
@@ -243,12 +252,12 @@ class BpodAcademy(Tk):
         )
 
         index = len(self.bpod_frames) - 1
-        col = 2 * (index % BpodAcademy.FRAMES_PER_ROW)
-        row = 2 * int(index / BpodAcademy.FRAMES_PER_ROW)
+        row = int(2 * position[0]) # 2 * int(index / BpodAcademy.FRAMES_PER_ROW)
+        col = int(2 * position[1]) # 2 * (index % BpodAcademy.FRAMES_PER_ROW)
 
         if (row == 0) and (col > 0):
             Label(self, width=BpodAcademy.INTER_COLUMN_WIDTH).grid(
-                row=0, column=col-1
+                row=0, column=col - 1
             )
         self.bpod_frames[index].grid(row=row, column=col)
         Label(self).grid(row=row + 1, column=col)
@@ -271,20 +280,28 @@ class BpodAcademy(Tk):
             values=[p[0] for p in all_ports] + ["EMU"],
         ).grid(sticky="nsew", row=1, column=1)
 
+        new_box_row = StringVar(new_box_window)
+        Label(new_box_window, text="Row: ").grid(sticky="w", row=2, column=0)
+        Combobox(new_box_window, textvariable=new_box_row, values=[0, 1, 2, 3, 4, 5]).grid(sticky="nsew", row=2, column=1)
+        
+        new_box_col = StringVar(new_box_window)
+        Label(new_box_window, text="Column: ").grid(sticky="w", row=3, column=0)
+        Combobox(new_box_window, textvariable=new_box_col, values=[0, 1, 2, 3, 4, 5]).grid(sticky="nsew", row=3, column=1)
+
         Button(
             new_box_window,
             text="Submit",
             command=lambda: self._add_box_command(
-                new_id.get(), new_port.get(), new_box_window
+                new_id.get(), new_port.get(), (int(new_box_row.get()), int(new_box_col.get())), new_box_window
             ),
-        ).grid(sticky="nsew", row=3, column=1)
+        ).grid(sticky="nsew", row=4, column=1)
         Button(new_box_window, text="Cancel", command=new_box_window.destroy).grid(
-            sticky="nsew", row=4, column=1
+            sticky="nsew", row=5, column=1
         )
 
-    def _add_box_command(self, bpod_id, bpod_serial, window=None):
+    def _add_box_command(self, bpod_id, bpod_serial, bpod_position, window=None):
 
-        reply = self._remote_to_server(("BPOD", "ADD", bpod_id, bpod_serial))
+        reply = self._remote_to_server(("BPOD", "ADD", bpod_id, bpod_serial, bpod_position))
         if not reply:
             messagebox.showerror(
                 "Add Bpod Failed!",
@@ -778,9 +795,10 @@ class BpodAcademy(Tk):
 
                     bpod_id = cmd[2]
                     bpod_serial = cmd[3]
+                    bpod_position = cmd[4]
                     self.cfg["bpod_ids"].append(bpod_id)
                     self.cfg["bpod_serials"].append(bpod_serial)
-                    self._add_box(bpod_id, bpod_serial)
+                    self._add_box(bpod_id, bpod_serial, bpod_position)
 
                 elif cmd[1] == "REMOVE":
 
@@ -851,49 +869,56 @@ class BpodAcademy(Tk):
 
         self.after_cancel(self.listen_to_server)
 
-        if self.remote:
-
+        if not self.remote:
+            if messagebox.askyesno("Close Server?", "Do you want to close down the server?", parent=self):
+                self._close_server()
+            else:
+                self._disconnect_remote()
+        else:
             self._disconnect_remote()
-            self.quit()
+        
+        self.quit()
+        self.destroy()
 
+    def _close_server(self):
+
+        ### check for running sessions ###
+        if any([fr.status == 2 for fr in self.bpod_frames]):
+            messagebox.showwarning(
+                "Bpod protocol(s) are currently running. Please close open protocols before exiting BpodAcademy.",
+                parent=self,
+            )
         else:
 
-            ### check for running sessions ###
-            if any([fr.status == 2 for fr in self.bpod_frames]):
-                messagebox.showwarning(
-                    "Bpod protocol(s) are currently running. Please close open protocols before exiting BpodAcademy.",
-                    parent=self,
-                )
-            else:
+            ### ask user to confirm closing ###
+            if messagebox.askokcancel(
+                "Close Bpod?",
+                "Are you sure you want to close BpodAcademy? Any open Bpod devices will be closed.",
+                parent=self,
+            ):
 
-                ### ask user to confirm closing ###
-                if messagebox.askokcancel(
-                    "Close Bpod?",
-                    "Are you sure you want to close BpodAcademy? Any open Bpod devices will be closed.",
-                    parent=self,
-                ):
+                closing_window = Toplevel(self)
+                closing_window.title("Closing Bpods")
+                Label(
+                    closing_window, text="Closing open Bpods. Please wait..."
+                ).pack()
+                closing_window.update()
 
-                    closing_window = Toplevel(self)
-                    closing_window.title("Closing Bpods")
-                    Label(
-                        closing_window, text="Closing open Bpods. Please wait..."
-                    ).pack()
-                    closing_window.update()
+                ### Close open Bpods ###
+                for i in range(len(self.bpod_frames)):
+                    if self.bpod_frames[i].status > 0:
+                        self.bpod_frames[i]._end_bpod()
 
-                    ### Close open Bpods ###
-                    for i in range(len(self.bpod_frames)):
-                        if self.bpod_frames[i].status > 0:
-                            self.bpod_frames[i]._end_bpod()
-
-                    ### Close BpodAcademy server ###
-                    self._remote_to_server(("CLOSE",))
+                ### Close BpodAcademy server ###
+                self._remote_to_server(("CLOSE",))
+                if hasattr(self, "server"):
                     self.server.stop()
                     self.server.close()
 
-                    closing_window.destroy()
+                closing_window.destroy()
 
-                    ### close BpodAcademy ###
-                    self.quit()
+                ### close BpodAcademy ###
+                # self.quit()
 
 
 def main():
