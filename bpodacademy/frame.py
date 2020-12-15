@@ -205,6 +205,7 @@ class BpodFrame(tk.Frame):
             state=protocol_selection_state,
             width=BpodFrame.GRID_WIDTH,
         )
+        self.subject_entry.bind("<Button-1>", self._update_subject_list)
         self.subject_entry.bind("<<ComboboxSelected>>", self._update_settings_list)
         self.subject_entry.grid(sticky="nsew", row=2, column=1)
 
@@ -232,6 +233,7 @@ class BpodFrame(tk.Frame):
             state=protocol_selection_state,
             width=BpodFrame.GRID_WIDTH,
         )
+        self.settings_entry.bind("<Button-1>", self._update_settings_list)
         self.settings_entry.grid(sticky="nsew", row=3, column=1)
 
         self.end_button = tk.Button(self, text="End Bpod", command=self._end_bpod)

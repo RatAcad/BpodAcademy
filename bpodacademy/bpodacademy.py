@@ -870,9 +870,10 @@ class BpodAcademy(Tk):
         self.after_cancel(self.listen_to_server)
 
         if not self.remote:
-            if messagebox.askyesno("Close Server?", "Do you want to close down the server?", parent=self):
-                self._close_server()
-            else:
+            closed = self._close_server(ask=True)
+            if closed == -1:
+                return 
+            elif closed == 0:
                 self._disconnect_remote()
         else:
             self._disconnect_remote()
@@ -880,52 +881,51 @@ class BpodAcademy(Tk):
         self.quit()
         self.destroy()
 
-    def _close_server(self):
+    def _close_server(self, ask=True):
+        
+        if ask:
 
-        ### check for running sessions ###
-        if any([fr.status == 2 for fr in self.bpod_frames]):
-            messagebox.showwarning(
-                "Bpod protocol(s) are currently running. Please close open protocols before exiting BpodAcademy.",
-                parent=self,
-            )
-        else:
+            if messagebox.askyesno("Close BpodAcademy Server?", "Do you want to close the BpodAcademy Server?\nAny open Bpod devices will be closed.", parent=self):
 
-            ### ask user to confirm closing ###
-            if any([fr.status > 0 for fr in self.bpod_frames]):
+                ### check for running sessions ###
+                if any([fr.status == 2 for fr in self.bpod_frames]):
+                    messagebox.showwarning(
+                        "Bpod protocol(s) are currently running. Please close open protocols before closing the BpodAcademy. Server",
+                        parent=self,
+                    )
 
-                if messagebox.askokcancel(
-                    "Close Bpod?",
-                    "Are you sure you want to close BpodAcademy? Any open Bpod devices will be closed.",
-                    parent=self,
-                ):
-
-                    closing_window = Toplevel(self)
-                    closing_window.title("Closing Bpods")
-                    Label(
-                        closing_window, text="Closing open Bpods. Please wait..."
-                    ).pack()
-                    closing_window.update()
-
-                    ### Close open Bpods ###
-                    for i in range(len(self.bpod_frames)):
-                        if self.bpod_frames[i].status > 0:
-                            self.bpod_frames[i]._end_bpod()
-
-                    closing_window.destroy()
+                    return -1
 
                 else:
 
-                    return 
+                    if any([fr.status == 1 for fr in self.bpod_frames]):
 
-            ### Close BpodAcademy server ###
-            self._remote_to_server(("CLOSE",))
-            if hasattr(self, "server"):
-                self.server.stop()
-                self.server.close()
+                        closing_window = Toplevel(self)
+                        closing_window.title("Closing Bpods")
+                        Label(
+                            closing_window, text="Closing open Bpods. Please wait..."
+                        ).pack()
+                        closing_window.update()
 
+                        ### Close open Bpods ###
+                        for i in range(len(self.bpod_frames)):
+                            if self.bpod_frames[i].status > 0:
+                                self.bpod_frames[i]._end_bpod()
 
-            ### close BpodAcademy ###
-            self.quit()
+                        closing_window.destroy()
+
+                    ### Close BpodAcademy server ###
+                    self._remote_to_server(("CLOSE",))
+                    if hasattr(self, "server"):
+                        self.server.stop()
+                        self.server.close()
+
+                    return 1
+
+            else:
+
+                return 0
+
 
 
 def main():
