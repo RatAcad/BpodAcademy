@@ -21,7 +21,10 @@ from scipy.io import savemat
 import zmq
 
 from bpodacademy.exception import BpodAcademyError
-from bpodacademy.server import BpodAcademyServer
+try:
+    from bpodacademy.server import BpodAcademyServer
+except ModuleNotFoundError:
+    pass
 from bpodacademy.frame import BpodFrame
 
 
