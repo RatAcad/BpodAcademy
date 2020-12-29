@@ -286,6 +286,8 @@ class BpodAcademyServer:
             protocols = [c.stem for c in candidates if (c / f"{c.stem}.m").is_file()]
         else:
             os.makedirs(protocol_dir)
+        
+        protocols.sort()
         return protocols
 
     def _load_subjects(self, protocol):
@@ -299,6 +301,8 @@ class BpodAcademyServer:
             subs_on_protocol = [c.stem for c in candidates if (c / protocol).exists()]
         else:
             os.makedirs(data_dir)
+        
+        subs_on_protocol.sort()
         return subs_on_protocol
 
     def _add_subject(self, protocol, subject):
@@ -325,6 +329,8 @@ class BpodAcademyServer:
             settings = [s.stem for s in list(settings_dir.glob("*.mat"))]
         else:
             os.makedirs(data_dir)
+
+        settings.sort()
         return settings
 
     def _copy_settings(
