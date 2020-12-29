@@ -123,7 +123,7 @@ class BpodFrame(tk.Frame):
         these_settings = self._remote_to_server(
             ("SETTINGS", "FETCH", self.protocol.get(), self.subject.get())
         )
-        if these_settings:
+        if these_settings is not None:
             if "DefaultSettings" not in these_settings:
                 these_settings.append("DefaultSettings")
             self.settings_entry["values"] = these_settings

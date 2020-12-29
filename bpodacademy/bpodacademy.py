@@ -21,6 +21,7 @@ from scipy.io import savemat
 import zmq
 
 from bpodacademy.exception import BpodAcademyError
+
 try:
     from bpodacademy.server import BpodAcademyServer
 except ModuleNotFoundError:
@@ -74,11 +75,19 @@ class BpodAcademy(Tk):
             self.title("Bpod Academy")
             self._connect_remote_to_server()
 
+            cfg_file = Path(f"{self.bpod_dir}/Academy/AcademyConfig.csv")
+            if not cfg_file.is_file():            
+                begin_config = messagebox.askokcancel("No Config File!", "Did not find a configuration file! Please click ok to begin configuring BpodAcademy or cancel to exit.", parent=self)
+                if begin_config:
+                    self._add_box_window()
+                else:
+                    self.quit()
+
         else:
 
             self.title("Bpod Academy (Remote)")
             self._connect_remote_to_server_window()
-        
+
         if platform.system() == "Darwin":
             self.resizable(False, False)
 
@@ -98,11 +107,9 @@ class BpodAcademy(Tk):
 
         set_bpod_dir = messagebox.askokcancel(
             "Bpod Directory not found!",
-            {
-                "The evironmental variable BPOD_DIR has not been set. "
-                "Please click ok to select the Bpod Directory or cancel to exit the program. "
-                "Please set BPOD_DIR in ~/.bash_profile to avoid seeing this message in the future."
-            },
+            "The evironmental variable BPOD_DIR has not been set. "
+            "Please click ok to select the Bpod Directory or cancel to exit the program. "
+            "Please set BPOD_DIR in ~/.bash_profile to avoid seeing this message in the future.",
             parent=self,
         )
 
@@ -234,7 +241,11 @@ class BpodAcademy(Tk):
 
         for i in range(len(self.cfg["bpod_ids"])):
 
-            self._add_box(self.cfg["bpod_ids"][i], self.cfg["bpod_serials"][i], self.cfg["bpod_positions"][i])
+            self._add_box(
+                self.cfg["bpod_ids"][i],
+                self.cfg["bpod_serials"][i],
+                self.cfg["bpod_positions"][i],
+            )
 
         self.protocol("WM_DELETE_WINDOW", self._close_bpod_academy)
 
@@ -285,17 +296,24 @@ class BpodAcademy(Tk):
 
         new_box_row = StringVar(new_box_window)
         Label(new_box_window, text="Row: ").grid(sticky="w", row=2, column=0)
-        Combobox(new_box_window, textvariable=new_box_row, values=[0, 1, 2, 3, 4, 5]).grid(sticky="nsew", row=2, column=1)
-        
+        Combobox(
+            new_box_window, textvariable=new_box_row, values=[0, 1, 2, 3, 4, 5]
+        ).grid(sticky="nsew", row=2, column=1)
+
         new_box_col = StringVar(new_box_window)
         Label(new_box_window, text="Column: ").grid(sticky="w", row=3, column=0)
-        Combobox(new_box_window, textvariable=new_box_col, values=[0, 1, 2, 3, 4, 5]).grid(sticky="nsew", row=3, column=1)
+        Combobox(
+            new_box_window, textvariable=new_box_col, values=[0, 1, 2, 3, 4, 5]
+        ).grid(sticky="nsew", row=3, column=1)
 
         Button(
             new_box_window,
             text="Submit",
             command=lambda: self._add_box_command(
-                new_id.get(), new_port.get(), (int(new_box_row.get()), int(new_box_col.get())), new_box_window
+                new_id.get(),
+                new_port.get(),
+                (int(new_box_row.get()), int(new_box_col.get())),
+                new_box_window,
             ),
         ).grid(sticky="nsew", row=4, column=1)
         Button(new_box_window, text="Cancel", command=new_box_window.destroy).grid(
@@ -304,7 +322,9 @@ class BpodAcademy(Tk):
 
     def _add_box_command(self, bpod_id, bpod_serial, bpod_position, window=None):
 
-        reply = self._remote_to_server(("BPOD", "ADD", bpod_id, bpod_serial, bpod_position))
+        reply = self._remote_to_server(
+            ("BPOD", "ADD", bpod_id, bpod_serial, bpod_position)
+        )
         if not reply:
             messagebox.showerror(
                 "Add Bpod Failed!",
@@ -875,20 +895,24 @@ class BpodAcademy(Tk):
         if not self.remote:
             closed = self._close_server(ask=True)
             if closed == -1:
-                return 
+                return
             elif closed == 0:
                 self._disconnect_remote()
         else:
             self._disconnect_remote()
-        
+
         self.quit()
         self.destroy()
 
     def _close_server(self, ask=True):
-        
+
         if ask:
 
-            if messagebox.askyesno("Close BpodAcademy Server?", "Do you want to close the BpodAcademy Server?\nAny open Bpod devices will be closed.", parent=self):
+            if messagebox.askyesno(
+                "Close BpodAcademy Server?",
+                "Do you want to close the BpodAcademy Server?\nAny open Bpod devices will be closed.",
+                parent=self,
+            ):
 
                 ### check for running sessions ###
                 if any([fr.status == 2 for fr in self.bpod_frames]):
@@ -928,7 +952,6 @@ class BpodAcademy(Tk):
             else:
 
                 return 0
-
 
 
 def main():

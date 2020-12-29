@@ -371,7 +371,8 @@ class BpodAcademyServer:
 
             self.cfg["bpod_ids"].append(bpod_id)
             self.cfg["bpod_serials"].append(bpod_serial)
-            self.cfg["bpod_status"].append(0)
+            self.cfg["bpod_status"].append((0, None, None, None))
+            self.cfg["bpod_positions"].append(bpod_position)
             self.bpod_process.append(None)
             self._save_config()
             self.publish.send_pyobj(("BPOD", "ADD", bpod_id, bpod_serial, bpod_position))
