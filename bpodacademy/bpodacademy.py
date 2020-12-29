@@ -953,6 +953,43 @@ class BpodAcademy(Tk):
 
                 return 0
 
+            ### ask user to confirm closing ###
+            if any([fr.status > 0 for fr in self.bpod_frames]):
+
+                if messagebox.askokcancel(
+                    "Close Bpod?",
+                    "Are you sure you want to close BpodAcademy? Any open Bpod devices will be closed.",
+                    parent=self,
+                ):
+
+                    closing_window = Toplevel(self)
+                    closing_window.title("Closing Bpods")
+                    Label(
+                        closing_window, text="Closing open Bpods. Please wait..."
+                    ).pack()
+                    closing_window.update()
+
+                    ### Close open Bpods ###
+                    for i in range(len(self.bpod_frames)):
+                        if self.bpod_frames[i].status > 0:
+                            self.bpod_frames[i]._end_bpod()
+
+                    closing_window.destroy()
+
+                else:
+
+                    return 
+
+            ### Close BpodAcademy server ###
+            self._remote_to_server(("CLOSE",))
+            if hasattr(self, "server"):
+                self.server.stop()
+                self.server.close()
+
+
+            ### close BpodAcademy ###
+            self.quit()
+            
 
 def main():
 

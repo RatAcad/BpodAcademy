@@ -227,9 +227,9 @@ class BpodAcademyServer:
 
                         elif cmd[1] == "RUN":
 
-                            protocol = cmd[2]
-                            subject = cmd[3]
-                            settings = cmd[4]
+                            protocol = cmd[3]
+                            subject = cmd[4]
+                            settings = cmd[5]
                             res = self._start_bpod_protocol(
                                 bpod_id, protocol, subject, settings
                             )
