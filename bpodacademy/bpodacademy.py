@@ -87,6 +87,10 @@ class BpodAcademy(Tk):
                     self._add_box_window()
                 else:
                     self.quit()
+                    self.destroy()
+                    self.server.stop()
+                    self.server.close()
+                    return 
 
         else:
 
@@ -990,7 +994,6 @@ class BpodAcademy(Tk):
             if hasattr(self, "server"):
                 self.server.stop()
                 self.server.close()
-
 
             ### close BpodAcademy ###
             self.quit()
