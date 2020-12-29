@@ -76,7 +76,12 @@ class BpodAcademy(Tk):
             self._connect_remote_to_server()
 
             cfg_file = Path(f"{self.bpod_dir}/Academy/AcademyConfig.csv")
-            if not cfg_file.is_file():            
+            has_cfg = True
+            if not cfg_file.is_file():
+                has_cfg = False
+            elif cfg_file.stat().st_size == 0:
+                has_cfg = False
+            if not has_cfg:
                 begin_config = messagebox.askokcancel("No Config File!", "Did not find a configuration file! Please click ok to begin configuring BpodAcademy or cancel to exit.", parent=self)
                 if begin_config:
                     self._add_box_window()
