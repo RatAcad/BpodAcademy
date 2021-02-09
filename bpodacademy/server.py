@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import zmq
 import threading
+from multiprocess.pool import ThreadPool
 import csv
 from scipy.io import savemat
 import shutil
@@ -86,7 +87,9 @@ class BpodAcademyServer:
     def _save_config(self):
 
         cfg_writer = csv.writer(open(self.cfg_file, "w", newline=""))
-        for n, s, p in zip(self.cfg["bpod_ids"], self.cfg["bpod_serials"], self.cfg["bpod_positions"]):
+        for n, s, p in zip(
+            self.cfg["bpod_ids"], self.cfg["bpod_serials"], self.cfg["bpod_positions"]
+        ):
             cfg_writer.writerow([n, s, p[0], p[1]])
 
     def start(self):
@@ -112,7 +115,45 @@ class BpodAcademyServer:
 
                     if cmd[0] == "CONFIG":
 
-                        self.reply.send_pyobj(self.cfg)
+                        if cmd[1] == "ACADEMY":
+
+                            self.reply.send_pyobj(self.cfg)
+
+                        elif cmd[1] == "TRAINING":
+
+                            if cmd[2] == "SAVE":
+
+                                config_file_name = cmd[3]
+                                bpod_ids = cmd[4]
+                                protocols = cmd[5]
+                                subjects = cmd[6]
+                                settings = cmd[7]
+                                res = self._save_training_config(
+                                    config_file_name,
+                                    bpod_ids,
+                                    protocols,
+                                    subjects,
+                                    settings,
+                                )
+                                self.reply.send_pyobj(res)
+
+                            elif cmd[2] == "FETCH":
+
+                                if len(cmd) == 3:
+
+                                    self.reply.send_pyobj(self._get_training_configs())
+
+                                else:
+
+                                    training_config_file = cmd[3]
+                                    training_config = self._load_training_config(training_config_file)
+                                    self.reply.send_pyobj(
+                                        ("CONFIG", "TRAINING") + training_config
+                                    )
+
+                            else:
+
+                                self.reply.send_pyobj(False)
 
                     elif cmd[0] == "PORTS":
 
@@ -211,8 +252,8 @@ class BpodAcademyServer:
                             self.publish.send_pyobj(cmd)
 
                         elif cmd[1] == "START":
-
-                            res = self._start_bpod(bpod_id)
+                            
+                            res = self._start_bpod(bpod_id) if bpod_id != "ALL" else self._start_all_bpods()
                             self.reply.send_pyobj(res)
 
                         elif cmd[1] == "GUI":
@@ -286,7 +327,7 @@ class BpodAcademyServer:
             protocols = [c.stem for c in candidates if (c / f"{c.stem}.m").is_file()]
         else:
             os.makedirs(protocol_dir)
-        
+
         protocols.sort()
         return protocols
 
@@ -301,7 +342,7 @@ class BpodAcademyServer:
             subs_on_protocol = [c.stem for c in candidates if (c / protocol).exists()]
         else:
             os.makedirs(data_dir)
-        
+
         subs_on_protocol.sort()
         return subs_on_protocol
 
@@ -375,7 +416,9 @@ class BpodAcademyServer:
             self.cfg["bpod_positions"].append(bpod_position)
             self.bpod_process.append(None)
             self._save_config()
-            self.publish.send_pyobj(("BPOD", "ADD", bpod_id, bpod_serial, bpod_position))
+            self.publish.send_pyobj(
+                ("BPOD", "ADD", bpod_id, bpod_serial, bpod_position)
+            )
 
             return True
 
@@ -409,6 +452,43 @@ class BpodAcademyServer:
         self._save_config()
         self.publish.send_pyobj(("BPOD", "CHANGE_PORT", bpod_id, bpod_serial))
         return True
+
+    def _save_training_config(
+        self, config_file_name, bpod_ids, protocols, subjects, settings
+    ):
+
+        training_config_dir = self.bpod_dir / "Academy" / "training"
+        training_config_dir.mkdir(exist_ok=True)
+
+        training_config_file = training_config_dir / f"{config_file_name}.csv"
+
+        cfg_writer = csv.writer(open(training_config_file, "w", newline=""))
+        for id, pro, sub, set in zip(bpod_ids, protocols, subjects, settings):
+            cfg_writer.writerow([id, pro, sub, set])
+
+    def _get_training_configs(self):
+
+        training_config_dir = self.bpod_dir / "Academy" / "training"
+        training_config_files = [str(tcfg.stem) for tcfg in training_config_dir.iterdir()] if training_config_dir.is_dir() else False
+        return training_config_files
+
+    def _load_training_config(self, training_config_file):
+
+        file_path = self.bpod_dir / "Academy" / "training" / f"{training_config_file}.csv"
+
+        bpod_ids = []
+        protocols = []
+        subjects = []
+        settings = []
+
+        cfg_reader = csv.reader(open(file_path, newline=""))
+        for i in cfg_reader:
+            bpod_ids.append(i[0])
+            protocols.append(i[1])
+            subjects.append(i[2])
+            settings.append(i[3])
+
+        return (bpod_ids, protocols, subjects, settings)
 
     def _start_bpod(self, bpod_id):
 
@@ -448,6 +528,25 @@ class BpodAcademyServer:
             code = 0
 
         return code
+
+    def _start_all_bpods(self):
+
+        not_open = [self.cfg["bpod_ids"][i] for i in range(len(self.bpod_process)) if self.bpod_process[i] is None]
+
+        try:
+
+            if len(not_open) > 0:
+
+                pool = ThreadPool(len(not_open))
+                pool.map(self._start_bpod, not_open)
+
+            return True
+
+        except Exception as e:
+
+            print(e)
+
+            return False
 
     def _switch_bpod_gui(self, bpod_id):
 

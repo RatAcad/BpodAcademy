@@ -249,36 +249,31 @@ class BpodFrame(tk.Frame):
             if not reply:
                 self._no_server_message("BPOD CHANGE_PORT")
 
-        # else:
-
-        #     cfg = self._remote_to_server(("CONFIG",))
-        #     port_index = cfg["bpod_ids"].index(self.bpod_id)
-        #     self.serial_number.set(cfg["bpod_serials"][port_index])
-
-        #     tk.messagebox.showwarning("Bpod Active!", f"{self.bpod_id} is currently active. Please close the Bpod before changing the serial port.")
-
-    def _start_bpod(self):
+    def _start_bpod(self, window=True):
 
         if self.status != 0:
 
-            tk.messagebox.showwarning(
-                "Bpod already started!",
-                f"{self.bpod_id} has already been started. Please close it before restarting.",
-                parent=self,
-            )
+            if window:
+                tk.messagebox.showwarning(
+                    "Bpod already started!",
+                    f"{self.bpod_id} has already been started. Please close it before restarting.",
+                    parent=self,
+                )
 
         else:
 
-            wait_dialog = tk.Toplevel(self)
-            wait_dialog.title("Starting Bpod")
-            tk.Label(wait_dialog, text="Please wait...").pack()
-            wait_dialog.update()
+            if window:
+                wait_dialog = tk.Toplevel(self)
+                wait_dialog.title("Starting Bpod")
+                tk.Label(wait_dialog, text="Please wait...").pack()
+                wait_dialog.update()
 
             reply = self._remote_to_server(("BPOD", "START", self.bpod_id))
             if reply is None:
                 self._no_server_message("START")
 
-            wait_dialog.destroy()
+            if window:
+                wait_dialog.destroy()
 
     def start_bpod(self, code):
 
@@ -445,11 +440,6 @@ class BpodFrame(tk.Frame):
                     )
                 else:
                     self._stop_bpod_protocol()
-                    tk.messagebox.showwarning(
-                        "Protocol Ended!",
-                        f"The protocol running on {self.bpod_id} ended!",
-                        parent=self,
-                    )
 
     def _stop_bpod_protocol(self):
 

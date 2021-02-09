@@ -17,7 +17,11 @@ from pathlib import Path
 import platform
 import shutil
 import csv
+from distutils.util import strtobool
+
+# from typing import Protocol
 from scipy.io import savemat
+from multiprocess.pool import ThreadPool
 import zmq
 
 from bpodacademy.exception import BpodAcademyError
@@ -82,7 +86,11 @@ class BpodAcademy(Tk):
             elif cfg_file.stat().st_size == 0:
                 has_cfg = False
             if not has_cfg:
-                begin_config = messagebox.askokcancel("No Config File!", "Did not find a configuration file! Please click ok to begin configuring BpodAcademy or cancel to exit.", parent=self)
+                begin_config = messagebox.askokcancel(
+                    "No Config File!",
+                    "Did not find a configuration file! Please click ok to begin configuring BpodAcademy or cancel to exit.",
+                    parent=self,
+                )
                 if begin_config:
                     self._add_box_window()
                 else:
@@ -90,7 +98,7 @@ class BpodAcademy(Tk):
                     self.destroy()
                     self.server.stop()
                     self.server.close()
-                    return 
+                    return
 
         else:
 
@@ -148,7 +156,7 @@ class BpodAcademy(Tk):
         self.subscribe.connect(f"tcp://{self.ip}:{self.port+1}")
 
         # look for connection
-        reply = self._remote_to_server(("CONFIG",), timeout=1000)
+        reply = self._remote_to_server(("CONFIG", "ACADEMY"), timeout=1000)
 
         if test:
             return reply
@@ -209,6 +217,8 @@ class BpodAcademy(Tk):
         bpod_menu = Menu(menubar, tearoff=0)
         bpod_menu.add_command(label="Add Bpod", command=self._add_box_window)
         bpod_menu.add_command(label="Remove Bpod", command=self._remove_box_window)
+        bpod_menu.add_command(label="Start All Bpods", command=self._start_all_bpods)
+        bpod_menu.add_command(label="Close All Bpods", command=self._close_all_bpods)
         menubar.add_cascade(label="Bpod", menu=bpod_menu)
 
         protocol_menu = Menu(menubar, tearoff=0)
@@ -239,6 +249,15 @@ class BpodAcademy(Tk):
         server_menu = Menu(menubar, tearoff=0)
         server_menu.add_command(label="Stop Server", command=self._close_server)
         menubar.add_cascade(label="Server", menu=server_menu)
+
+        training_menu = Menu(menubar, tearoff=0)
+        training_menu.add_command(
+            label="Save Training Configuration", command=self._save_training_config
+        )
+        training_menu.add_command(
+            label="Load Training Configuration", command=self._load_training_config
+        )
+        menubar.add_cascade(label="Training", menu=training_menu)
 
         self.config(menu=menubar)
 
@@ -697,9 +716,11 @@ class BpodAcademy(Tk):
 
         Label(create_settings_window, text="Names").grid(row=4, column=0)
         Label(create_settings_window, text="Values").grid(row=4, column=1)
+        Label(create_settings_window, text="Data Types").grid(row=4, column=2)
 
         settings_names = []
         settings_values = []
+        settings_dtypes = []
 
         def add_settings_field():
             settings_names.append(StringVar(create_settings_window))
@@ -714,6 +735,13 @@ class BpodAcademy(Tk):
                 textvariable=settings_values[-1],
                 width=BpodAcademy.GRID_WIDTH,
             ).grid(row=4 + len(settings_values), column=1)
+            settings_dtypes.append(StringVar(create_settings_window))
+            Combobox(
+                create_settings_window,
+                textvariable=settings_dtypes[-1],
+                values=["int", "float", "bool", "string"],
+                width=BpodAcademy.GRID_WIDTH,
+            ).grid(row=4 + len(settings_dtypes), column=2)
 
         add_settings_field()
         Button(
@@ -731,6 +759,7 @@ class BpodAcademy(Tk):
                 settings_file.get(),
                 settings_names,
                 settings_values,
+                settings_dtypes,
                 create_settings_window,
             ),
         ).grid(sticky="nsew", row=102, column=0)
@@ -740,17 +769,38 @@ class BpodAcademy(Tk):
             command=create_settings_window.destroy,
         ).grid(sticky="nsew", row=102, column=1)
 
-        create_settings_window.mainloop()
+        # create_settings_window.mainloop()
 
     def _create_settings_command(
-        self, protocol, subject, settings_file, names, values, window=None
+        self, protocol, subject, settings_file, names, values, dtypes, window=None
     ):
 
         # create dictionary from user settings
         settings_dict = {}
-        for n, v in zip(names, values):
-            if (n.get()) and (v.get()):
-                settings_dict[n.get()] = float(v.get())
+        for n, v, dt in zip(names, values, dtypes):
+            v_strip = v.get().replace(" ", "")
+            if (n.get()) and (v_strip):
+                if dt == "int":
+                    val = int(v_strip)
+                elif dt == "float":
+                    val = float(v_strip)
+                elif dt == "bool":
+                    val = bool(strtobool(v_strip))
+                elif dt == "string":
+                    val = v_strip
+                else:
+                    try:
+                        val = int(v_strip)
+                    except ValueError:
+                        try:
+                            val = float(v_strip)
+                        except ValueError:
+                            try:
+                                val = bool(strtobool(v_strip))
+                            except ValueError:
+                                val = v_strip
+
+                settings_dict[n.get()] = val
 
         reply = self._remote_to_server(
             ("SETTINGS", "CREATE", protocol, subject, settings_file, settings_dict)
@@ -913,6 +963,43 @@ class BpodAcademy(Tk):
         self.quit()
         self.destroy()
 
+    def _start_all_bpods(self):
+
+        not_open = [
+            i for i in range(len(self.bpod_frames)) if self.bpod_frames[i].status == 0
+        ]
+
+        if len(not_open) > 0:
+
+            opening_window = Toplevel(self)
+            opening_window.title("Starting Bpods")
+            Label(opening_window, text="Starting all Bpods. Please wait...").pack()
+            opening_window.update()
+
+            res = self._remote_to_server(("BPOD", "START", "ALL"))
+
+            opening_window.destroy()
+
+            if not res:
+                messagebox.showerror("Failure", "Failed to open all Bpods!")
+
+
+    def _close_all_bpods(self):
+
+        if any([fr.status == 1 for fr in self.bpod_frames]):
+
+            closing_window = Toplevel(self)
+            closing_window.title("Closing Bpods")
+            Label(closing_window, text="Closing open Bpods. Please wait...").pack()
+            closing_window.update()
+
+            ### Close open Bpods ###
+            for i in range(len(self.bpod_frames)):
+                if self.bpod_frames[i].status > 0:
+                    self.bpod_frames[i]._end_bpod()
+
+            closing_window.destroy()
+
     def _close_server(self, ask=True):
 
         if ask:
@@ -934,21 +1021,7 @@ class BpodAcademy(Tk):
 
                 else:
 
-                    if any([fr.status == 1 for fr in self.bpod_frames]):
-
-                        closing_window = Toplevel(self)
-                        closing_window.title("Closing Bpods")
-                        Label(
-                            closing_window, text="Closing open Bpods. Please wait..."
-                        ).pack()
-                        closing_window.update()
-
-                        ### Close open Bpods ###
-                        for i in range(len(self.bpod_frames)):
-                            if self.bpod_frames[i].status > 0:
-                                self.bpod_frames[i]._end_bpod()
-
-                        closing_window.destroy()
+                    self._close_all_bpods()
 
                     ### Close BpodAcademy server ###
                     self._remote_to_server(("CLOSE",))
@@ -962,42 +1035,92 @@ class BpodAcademy(Tk):
 
                 return 0
 
-            ### ask user to confirm closing ###
-            if any([fr.status > 0 for fr in self.bpod_frames]):
+    def _save_training_config(self):
 
-                if messagebox.askokcancel(
-                    "Close Bpod?",
-                    "Are you sure you want to close BpodAcademy? Any open Bpod devices will be closed.",
-                    parent=self,
-                ):
+        config_file_name = simpledialog.askstring(
+            "Training Config File",
+            "Please enter a name for the new training config file:",
+            parent=self,
+        )
 
-                    closing_window = Toplevel(self)
-                    closing_window.title("Closing Bpods")
-                    Label(
-                        closing_window, text="Closing open Bpods. Please wait..."
-                    ).pack()
-                    closing_window.update()
+        if config_file_name is not None:
 
-                    ### Close open Bpods ###
-                    for i in range(len(self.bpod_frames)):
-                        if self.bpod_frames[i].status > 0:
-                            self.bpod_frames[i]._end_bpod()
+            bpod_ids = []
+            protocols = []
+            subjects = []
+            settings = []
+            for fr in self.bpod_frames:
+                bpod_ids.append(fr.bpod_id)
+                protocols.append(fr.protocol.get())
+                subjects.append(fr.subject.get())
+                settings.append(fr.settings.get())
 
-                    closing_window.destroy()
+            self._remote_to_server(
+                (
+                    "CONFIG",
+                    "TRAINING",
+                    "SAVE",
+                    config_file_name,
+                    bpod_ids,
+                    protocols,
+                    subjects,
+                    settings,
+                )
+            )
 
-                else:
+    def _load_training_config(self):
 
-                    return 
+        training_configs = self._remote_to_server(("CONFIG", "TRAINING", "FETCH"))
 
-            ### Close BpodAcademy server ###
-            self._remote_to_server(("CLOSE",))
-            if hasattr(self, "server"):
-                self.server.stop()
-                self.server.close()
+        if training_configs:
+            choose_training_config_window = Toplevel(self)
+            choose_training_config_window.title("Select Training Configuration")
 
-            ### close BpodAcademy ###
-            self.quit()
-            
+            Label(choose_training_config_window, text="Configuration: ").grid(
+                sticky="w", row=0, column=0
+            )
+            selected_file = StringVar(choose_training_config_window, value="")
+            Combobox(
+                choose_training_config_window,
+                textvariable=selected_file,
+                values=training_configs,
+                state="readonly",
+            ).grid(sticky="nsew", row=0, column=1)
+            Button(
+                choose_training_config_window,
+                text="Submit",
+                command=lambda: self._set_training_config(
+                    selected_file.get(), choose_training_config_window
+                ),
+            ).grid(sticky="nsew", row=1, column=1)
+            Button(
+                choose_training_config_window,
+                text="Cancel",
+                command=choose_training_config_window.destroy,
+            ).grid(sticky="nsew", row=2, column=1)
+
+    def _set_training_config(self, training_config_file, window):
+
+        window.destroy()
+
+        if training_config_file:
+            training_config = self._remote_to_server(
+                ("CONFIG", "TRAINING", "FETCH", training_config_file)
+            )
+
+            if training_config[:2] == ("CONFIG", "TRAINING"):
+                bpod_ids, protocols, subjects, settings = training_config[2:]
+
+                for i in range(len(bpod_ids)):
+                    this_bpod_ind = self.cfg["bpod_ids"].index(bpod_ids[i])
+                    self.bpod_frames[this_bpod_ind].protocol.set(protocols[i])
+                    self.bpod_frames[this_bpod_ind].subject.set(subjects[i])
+                    self.bpod_frames[this_bpod_ind].settings.set(settings[i])
+
+            else:
+
+                messagebox.showerror("Server did not return training config.")
+
 
 def main():
 
