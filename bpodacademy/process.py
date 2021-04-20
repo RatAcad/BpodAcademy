@@ -2,6 +2,9 @@ import multiprocess as mp
 from multiprocess.queues import Queue
 from queue import Empty
 import kthread
+import cv2
+import ctypes
+import numpy as np
 
 from pathlib import Path
 import datetime
@@ -25,6 +28,8 @@ class BpodProcess:
     WAIT_START_PROTOCOL_SEC = 1
     WAIT_KILL_PROTOCOL_SEC = 10
     WAIT_KILL_PROCESS_SEC = 10
+    WAIT_START_CAMERA_SEC = 10
+    CAMERA_DISPLAY_MAX_WIDTH = 320
     SAVE_LOG_SEC = 1
 
     # Utility Functions
@@ -37,7 +42,7 @@ class BpodProcess:
 
     # Object Methods
 
-    def __init__(self, id, serial_port, log_dir=None):
+    def __init__(self, id, serial_port, camera=None, log_dir=None):
         """Constructor method
 
         Parameters
@@ -52,6 +57,7 @@ class BpodProcess:
 
         self.id = id
         self.serial_port = serial_port
+        self.camera = None
         self.ctx = mp.get_context("spawn")
         self.log_dir = (
             Path(log_dir) if log_dir is not None else Path("~/logs").expanduser()
@@ -324,6 +330,171 @@ class BpodProcess:
         # close logging thread
 
         self._close_log_thread()
+
+    def _camera_acquire_on_thread(self):
+
+        while self.camera_acquire:
+
+            ret, frame = self.cap.read()
+            frame_time = time.time()
+
+            if ret:
+
+                np.copyto(self.frame, cv2.resize(frame, self.res_display))
+
+                if self.camera_write:
+                    self.frame_queue.put((frame, frame_time))
+
+            else:
+
+                raise Exception("OpenCV VideoCapture.read did not return an image!")
+
+    def _camera_write_on_thread(self):
+
+        start_camera_time = datetime.datetime.now()
+
+        """
+
+            SAVE VIDEO -- NEW FILE EVERY 1 HR
+
+        """
+
+    def _run_camera_process(self, frame_shared, write=False):
+
+        # connect to camera, get first image
+        self.cap = cv2.VideoCapture(self.camera)
+        ret, frame = self.cap.read()
+
+        self.frame = np.frombuffer(
+            self.frame_shared.get_obj(), dtype="uint8"
+        ).reshape(self.res_display[1], self.res_display[0], 3)
+
+        self.q_cam_to_main.put(ret)
+
+        # setup camera acquisition and write threads
+        self.frame_queue = Queue(ctx=self.ctx)
+        self.camera_acquire = True
+        self.camera_write = write
+
+        # start camera acquisition and write threads
+        self.camera_acquire_thread = kthread.KThread(
+            target=self._camera_acquire_on_thread, daemon=True
+        )
+        if self.camera_write:
+            self.camera_write_thread = kthread.KThread(
+                target=self._camera_write_on_thread, daemon=True
+            )
+            self.camera_write_thread.start()
+        else:
+            self.camera_write_thread = None
+        self.camera_acquire_thread.start()
+
+        # wait for signal to stop
+        while self.camera_acquire:
+
+            cmd = self.q_main_to_cam.get()
+
+            if cmd[0] == "WRITE":
+                self.camera_write = cmd[1]
+
+            elif cmd[0] == "ACQUIRE":
+                self.camera_acquire = cmd[1]
+
+        # wait for threads to finish
+        self.camera_acquire_thread.join()
+        if self.camera_write_thread:
+            self.camera_write_thread.join()
+
+        # close connection to camera
+        self.cap.release()
+
+    def set_camera(self, device):
+
+        if device is not None:
+
+            self.camera = device
+            cap = cv2.VideoCapture(self.camera)
+            res = (
+                int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            )
+            cap.release()
+
+            self.res_display = (
+                res
+                if res[0] <= int(BpodProcess.CAMERA_DISPLAY_MAX_WIDTH)
+                else (
+                    int(BpodProcess.CAMERA_DISPLAY_MAX_WIDTH),
+                    int(BpodProcess.CAMERA_DISPLAY_MAX_WIDTH / (res[0] / res[1])),
+                )
+            )
+            self.frame_shared = mp.Array(
+                ctypes.c_uint8, self.res_display[1] * self.res_display[0] * 3
+            )
+            self.frame = np.frombuffer(
+                self.frame_shared.get_obj(), dtype="uint8"
+            ).reshape(self.res_display[1], self.res_display[0], 3)
+
+            return True
+
+        else:
+
+            return False
+
+    def start_camera(self, device, write=False):
+        
+        has_camera = self.set_camera(device)
+
+        if has_camera:
+
+            self.q_cam_to_main = Queue(ctx=self.ctx)
+            self.q_main_to_cam = Queue(ctx=self.ctx)
+
+            self.cam_proc = self.ctx.Process(
+                target=self._run_camera_process,
+                args=(self.frame_shared, write),
+                daemon=True,
+            )
+            self.cam_proc.start()
+
+            try:
+                code = int(
+                    self.q_cam_to_main.get(timeout=BpodProcess.WAIT_START_CAMERA_SEC)
+                )
+            except Empty:
+                code = -1
+
+        else:
+
+            code = 0
+
+        return code
+
+    def get_camera_image(self):
+
+        if self.camera is not None:
+            return self.frame
+        else:
+            return None
+
+    def stop_camera(self):
+
+        # send signal to stop camera
+        if self.camera is not None:
+            self.q_main_to_cam.put(("ACQUIRE", False))
+
+            # wait for camera process to finish
+            self.cam_proc.join()
+
+            # close camera process
+            self.cam_proc = None
+            self.camera = None
+
+            return 1
+
+        else:
+
+            return 0
 
     def start(self, timeout=WAIT_START_PROCESS_SEC):
 

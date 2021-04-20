@@ -13,13 +13,25 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/gkane26/BpodAcademy",
     packages=setuptools.find_packages(),
-    install_requires=['pyserial', 'scipy', 'multiprocess', 'kthread', 'pyzmq'],
+    install_requires=[
+        "pyserial",
+        "scipy",
+        "multiprocess",
+        "kthread",
+        "pyzmq",
+        "pillow",
+        "cv2",
+    ],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU General Public License v3 (GPL-3)",
         "Operating System :: OS Independent",
     ],
-    entry_points={'console_scripts' : ['bpodacademy=bpodacademy.bpodacademy:main',
-                                       'bpodacademy-server=bpodacademy.server:main']},
-    python_requires='>=3.6',
+    entry_points={
+        "console_scripts": [
+            "bpodacademy=bpodacademy.bpodacademy:main",
+            "bpodacademy-server=bpodacademy.server:main",
+        ]
+    },
+    python_requires=">=3.6",
 )

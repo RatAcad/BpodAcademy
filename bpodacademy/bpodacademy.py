@@ -242,6 +242,10 @@ class BpodAcademy(Tk):
         )
         menubar.add_cascade(label="Settings", menu=settings_menu)
 
+        camera_menu = Menu(menubar, tearoff=0)
+        camera_menu.add_command(label="Refresh Cameras", command=self._refresh_cameras_command)
+        menubar.add_cascade(label="Cameras", menu=camera_menu)
+
         logs_menu = Menu(menubar, tearoff=0)
         logs_menu.add_command(label="Delete Logs", command=self._delete_logs_command)
         menubar.add_cascade(label="Logs", menu=logs_menu)
@@ -591,7 +595,7 @@ class BpodAcademy(Tk):
         )
 
         def update_copy_to_subject(event=None):
-            copy_to_subject_entry["values"] = self._remote_to_server(
+            copy_to_subject_entry["values"] = ["All"] + self._remote_to_server(
                 ("SUBJECTS", "FETCH", copy_to_protocol.get())
             )
             copy_to_subject.set("")
@@ -815,6 +819,21 @@ class BpodAcademy(Tk):
         if window is not None:
             window.destroy()
 
+    def _refresh_cameras_command(self):
+
+        reply = self._remote_to_server(("CAMERAS", "REFRESH"))
+        if not reply:
+            messagebox.showwarning(
+                "Refresh Cameras Failed!",
+                "Failed to refresh cameras, please check server connections!",
+                parent=self,
+            )
+
+    def _refresh_cameras(self, cameras):
+
+        for i in range(len(self.bpod_frames)):
+            self.bpod_frames[i].set_cameras(cameras)
+
     def _delete_logs_command(self):
 
         delete_logs = messagebox.askokcancel(
@@ -852,10 +871,10 @@ class BpodAcademy(Tk):
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
         self.bpod_frames[bpod_index].end_bpod()
 
-    def _start_bpod_protocol(self, bpod_id, protocol, subject, settings):
+    def _start_bpod_protocol(self, bpod_id, protocol, subject, settings, camera):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
-        self.bpod_frames[bpod_index].start_bpod_protocol(protocol, subject, settings)
+        self.bpod_frames[bpod_index].start_bpod_protocol(protocol, subject, settings, camera)
 
     def _stop_bpod_protocol(self, bpod_id):
 
@@ -898,6 +917,11 @@ class BpodAcademy(Tk):
                 protocols = cmd[1]
                 self._refresh_protocols(protocols)
 
+            elif cmd[0] == "CAMERAS":
+
+                cameras = cmd[1]
+                self._refresh_cameras(cameras)
+
             elif cmd[0] == "START":
 
                 bpod_id = cmd[1]
@@ -910,7 +934,8 @@ class BpodAcademy(Tk):
                 protocol = cmd[2]
                 subject = cmd[3]
                 settings = cmd[4]
-                self._start_bpod_protocol(bpod_id, protocol, subject, settings)
+                camera = cmd[5]
+                self._start_bpod_protocol(bpod_id, protocol, subject, settings, camera)
 
             elif cmd[0] == "STOP":
 
@@ -982,7 +1007,6 @@ class BpodAcademy(Tk):
 
             if not res:
                 messagebox.showerror("Failure", "Failed to open all Bpods!")
-
 
     def _close_all_bpods(self):
 
