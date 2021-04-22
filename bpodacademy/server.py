@@ -17,6 +17,7 @@ from bpodacademy.process import BpodProcess
 class BpodAcademyServer:
 
     ### Constants ###
+    BPOD_DIR = os.getenv("BPOD_DIR")
     ZMQ_REPLY_WAIT_MS = 10
 
     ### Utility functions ###
@@ -335,7 +336,8 @@ class BpodAcademyServer:
 
                         elif cmd[1] == "STOP":
 
-                            res = self._stop_bpod_protocol(bpod_id)
+                            stop_camera_write_only = cmd[3]
+                            res = self._stop_bpod_protocol(bpod_id, stop_camera_write_only)
                             self.reply.send_pyobj(res)
 
                         elif cmd[1] == "END":
@@ -453,9 +455,7 @@ class BpodAcademyServer:
         savemat(full_file, {"ProtocolSettings": settings_dict})
         return True
 
-    def _start_camera(self, bpod_id, camera_id, write=False):
-
-        print("start camera server")
+    def _start_camera(self, bpod_id, camera_id, fileparts=None):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
 
@@ -466,7 +466,7 @@ class BpodAcademyServer:
             except ValueError:
                 pass
 
-            res = self.bpod_process[bpod_index].start_camera(camera_id, write)
+            res = self.bpod_process[bpod_index].start_camera(camera_id, fileparts)
 
             return res
         
@@ -480,10 +480,10 @@ class BpodAcademyServer:
         res = self.bpod_process[bpod_index].get_camera_image()
         return res
 
-    def _stop_camera(self, bpod_id):
+    def _stop_camera(self, bpod_id, write_only=False):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
-        res = self.bpod_process[bpod_index].stop_camera()
+        res = self.bpod_process[bpod_index].stop_camera(write_only)
         return res
 
     def _delete_logs(self):
@@ -668,8 +668,9 @@ class BpodAcademyServer:
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
         settings = settings if settings is not None else "DefaultSettings"
 
-        if camera is not None:
-            camera_res = self.bpod_process[bpod_index].start_camera(camera, write=True)
+        if (camera is not None) and (camera != ""):
+            fileparts = (self.bpod_dir, protocol, subject)
+            camera_res = self._start_camera(bpod_id, camera, fileparts)
             if camera_res <= 0:
                 BpodAcademyError(f"Error starting video for Bpod {bpod_id}, Camera {camera}")
 
@@ -700,11 +701,12 @@ class BpodAcademyServer:
         else:
             return (0,)
 
-    def _stop_bpod_protocol(self, bpod_id):
+    def _stop_bpod_protocol(self, bpod_id, stop_camera_write_only=False):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
 
-        res = self.bpod_process[bpod_index].send_command(("STOP",))
+        res = self.bpod_process[bpod_index].send_command(("STOP",))        
+        camera_res = self.bpod_process[bpod_index].stop_camera(stop_camera_write_only)
 
         if (res is not None) and (res[0] == "STOP"):
             if res[1] == 1:

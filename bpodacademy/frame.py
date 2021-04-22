@@ -418,11 +418,6 @@ class BpodFrame(tk.Frame):
 
             else:
 
-                turn_on_camera = False
-                if self.camera_window:
-                    turn_on_camera = True
-                    self._close_camera_window()
-
                 reply = self._remote_to_server(
                     (
                         "BPOD",
@@ -449,9 +444,6 @@ class BpodFrame(tk.Frame):
                         f"Protocol failed to start on {self.bpod_id}! Please check if a protocol is currently running.",
                         parent=self,
                     )
-                else:
-                    if turn_on_camera:
-                        self._open_camera_window()
 
     def start_bpod_protocol(self, protocol, subject, settings, camera):
 
@@ -498,7 +490,9 @@ class BpodFrame(tk.Frame):
 
         else:
 
-            reply = self._remote_to_server(("BPOD", "STOP", self.bpod_id))
+            stop_camera_write_only = self.camera_window is not None
+
+            reply = self._remote_to_server(("BPOD", "STOP", self.bpod_id, stop_camera_write_only))
 
             if reply is None:
                 self._no_server_message("STOP")
@@ -517,7 +511,7 @@ class BpodFrame(tk.Frame):
         self.protocol_entry["state"] = "readonly"
         self.subject_entry["state"] = "readonly"
         self.settings_entry["state"] = "readonly"
-        self.camera_entry["state"] = "disabled"
+        self.camera_entry["state"] = "normal"
 
     def _end_bpod(self):
 
@@ -544,19 +538,31 @@ class BpodFrame(tk.Frame):
 
     def _toggle_video(self):
 
-        if self.camera_window:
+        if self.status == 0:
+  
+            tk.messagebox.showwarning("Bpod not started!", "Please connect to the Bpod before showing the video.", parent=self)
+        
+        elif self.camera_window:
             
             self._close_camera_window()
-            res = self._remote_to_server(("CAMERAS", "STOP", self.bpod_id))
-            if res < 0:
-                BpodAcademyError(f"Error stopping camera for Bpod: {self.bpod_id}, Camera ID: {self.camera.get()}")
-            else:
-                self.show_camera_button["text"] = "Show Video"
+
+            if self.status < 2:
+                res = self._remote_to_server(("CAMERAS", "STOP", self.bpod_id))
+                if res < 0:
+                    BpodAcademyError(f"Error stopping camera for Bpod: {self.bpod_id}, Camera ID: {self.camera.get()}")
+
+            self.show_camera_button["text"] = "Show Video"
 
         else:
 
             res = self._remote_to_server(("CAMERAS", "START", self.bpod_id, self.camera.get()))
-            if res == -2:
+
+            if res > 0:
+                self._open_camera_window()
+                self.show_camera_button["text"] = "Hide Video"
+            elif res == 0:
+                tk.messagebox.showwarning("No Camera Selected!", "Please select a camera to show video!", parent=self)
+            elif res == -2:
                 tk.messagebox.showerror(
                     "Bpod Not Started!",
                     "The Bpod must be started before opening the camera.",
@@ -564,14 +570,11 @@ class BpodFrame(tk.Frame):
                 )
             elif res == -1:
                 BpodAcademyError(f"Error starting camera for Bpod: {self.bpod_id}, Camera ID: {self.camera.get()}")
-            elif res > 0:
-                print("opening window")
-                self._open_camera_window()
-                self.show_camera_button["text"] = "Hide Video"
+
 
 
     def _open_camera_window(self):
-
+        
         self.camera_window = tk.Toplevel(self)
         self.camera_window.title(f"Bpod: {self.bpod_id}, Camera: {self.camera.get()}")
         self.camera_display_label = tk.Label(self.camera_window)
