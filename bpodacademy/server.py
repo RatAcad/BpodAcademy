@@ -12,6 +12,7 @@ import cv2
 
 from bpodacademy.exception import BpodAcademyError
 from bpodacademy.process import BpodProcess
+from bpodacademy.camera import BpodAcademyCamera
 
 
 class BpodAcademyServer:
@@ -61,6 +62,7 @@ class BpodAcademyServer:
             )
 
         self.cfg_file = Path(f"{self.bpod_dir}/Academy/AcademyConfig.csv")
+        self.cfg_file_camera = Path(f"{self.bpod_dir}/Academy/CameraConfig.csv")
         self._read_config()
 
         # create log dir if it doesn't exist
@@ -69,8 +71,9 @@ class BpodAcademyServer:
 
         # initialize bpod process managers
         self.bpod_process = [None for bpod_id in self.cfg["bpod_ids"]]
+        self.camera_process = [None for bpod_id in self.cfg["bpod_ids"]]
         self.bpod_ports = BpodAcademyServer._get_bpod_ports()
-        self.cameras = BpodAcademyServer._get_cameras()
+        self.camera_devices = BpodAcademyServer._get_cameras()
 
         context = zmq.Context()
         self.reply = context.socket(zmq.REP)
@@ -103,6 +106,24 @@ class BpodAcademyServer:
             "bpod_status": bpod_status,
         }
 
+        self.cameras = {}
+
+        if os.path.isfile(self.cfg_file_camera):
+
+            cfg_reader = csv.reader(open(self.cfg_file_camera, newline=""))
+            for i in cfg_reader:
+                this_camera = {
+                    i[0]: {
+                        "device": i[1],
+                        "width": int(i[2]) if i[2] else None,
+                        "height": int(i[3]) if i[3] else None,
+                        "fps": int(i[4]) if i[4] else None,
+                        "exposure": int(i[5]) if i[5] else None,
+                        "gain": int(i[6]) if i[6] else None,
+                    }
+                }
+                self.cameras.update(this_camera)
+
     def _save_config(self):
 
         cfg_writer = csv.writer(open(self.cfg_file, "w", newline=""))
@@ -110,6 +131,21 @@ class BpodAcademyServer:
             self.cfg["bpod_ids"], self.cfg["bpod_serials"], self.cfg["bpod_positions"]
         ):
             cfg_writer.writerow([n, s, p[0], p[1]])
+
+        cfg_camera_writer = csv.writer(open(self.cfg_file_camera, "w", newline=""))
+        for i in self.cameras:
+            cam = self.cameras[i]
+            cfg_camera_writer.writerow(
+                [
+                    i,
+                    cam["device"],
+                    cam["width"],
+                    cam["height"],
+                    cam["fps"],
+                    cam["exposure"],
+                    cam["gain"],
+                ]
+            )
 
     def start(self):
 
@@ -136,7 +172,7 @@ class BpodAcademyServer:
 
                         if cmd[1] == "ACADEMY":
 
-                            self.reply.send_pyobj(self.cfg)
+                            self.reply.send_pyobj((self.cfg, self.cameras))
 
                         elif cmd[1] == "TRAINING":
 
@@ -241,18 +277,22 @@ class BpodAcademyServer:
                     elif cmd[0] == "CAMERAS":
 
                         if (len(cmd) == 1) or (cmd[1] == "FETCH"):
-                            self.reply.send_pyobj(self.cameras)
+                            self.reply.send_pyobj(self.camera_devices)
 
                         elif cmd[1] == "REFRESH":
+                            self.camera_devices = BpodAcademyServer._get_cameras()
                             self.reply.send_pyobj(True)
-                            self.publish.send_pyobj(
-                                ("CAMERAS", BpodAcademyServer._get_cameras())
-                            )
+
+                        elif cmd[1] == "EDIT":
+                            bpod_id = cmd[2]
+                            camera_settings = cmd[3]
+                            self._edit_camera_settings(bpod_id, camera_settings)
+                            self.reply.send_pyobj(True)
 
                         elif cmd[1] == "START":
                             bpod_id = cmd[2]
-                            camera_id = cmd[3]
-                            res = self._start_camera(bpod_id, camera_id)
+                            camera_settings = cmd[3]
+                            res = self._start_camera(bpod_id, camera_settings)
                             self.reply.send_pyobj(res)
 
                         elif cmd[1] == "IMAGE":
@@ -337,7 +377,9 @@ class BpodAcademyServer:
                         elif cmd[1] == "STOP":
 
                             stop_camera_write_only = cmd[3]
-                            res = self._stop_bpod_protocol(bpod_id, stop_camera_write_only)
+                            res = self._stop_bpod_protocol(
+                                bpod_id, stop_camera_write_only
+                            )
                             self.reply.send_pyobj(res)
 
                         elif cmd[1] == "END":
@@ -455,35 +497,65 @@ class BpodAcademyServer:
         savemat(full_file, {"ProtocolSettings": settings_dict})
         return True
 
-    def _start_camera(self, bpod_id, camera_id, fileparts=None):
+    def _edit_camera_settings(self, bpod_id, camera_settings):
+
+        self.cameras[bpod_id] = camera_settings
+        self._save_config()
+        self.publish.send_pyobj(("CAMERAS", bpod_id, camera_settings))
+
+    def _start_camera(self, bpod_id, camera_settings, fileparts=None):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
 
-        if self.bpod_process[bpod_index] is not None:
+        if (camera_settings is None) or (camera_settings["device"] == ""):
+            return -2
 
-            try:
-                camera_id = int(camera_id)
-            except ValueError:
-                pass
+        if self.camera_process[bpod_index] is not None:
 
-            res = self.bpod_process[bpod_index].start_camera(camera_id, fileparts)
+            if camera_settings["device"] != str(self.camera_process[bpod_index].device):
+                if self._query_bpod_status(bpod_id)[0] == 2:
+                    return -3
+                else:
+                    self.camera_process[bpod_index].stop_acquisition()
+                    self.camera_process[bpod_index] = None
+            
+        if self.camera_process[bpod_index] is None:
+            self.camera_process[bpod_index] = BpodAcademyCamera(
+                camera_settings["device"],
+                camera_settings["width"],
+                camera_settings["height"],
+                camera_settings["fps"],
+                camera_settings["exposure"],
+                camera_settings["gain"],
+            )
 
-            return res
-        
+            res = self.camera_process[bpod_index].start_acquisition(fileparts)
+
         else:
 
-            return -2
+            if fileparts is not None:
+                res = self.camera_process[bpod_index].start_write(fileparts)
+            else:
+                res = 1
+
+        return res
 
     def _get_camera_image(self, bpod_id):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
-        res = self.bpod_process[bpod_index].get_camera_image()
-        return res
+        if self.camera_process[bpod_index] is not None:
+            return self.camera_process[bpod_index].get_image()
+        return None
 
     def _stop_camera(self, bpod_id, write_only=False):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
-        res = self.bpod_process[bpod_index].stop_camera(write_only)
+        if write_only:
+            res = self.camera_process[bpod_index].stop_write()
+        else:
+            res = self.camera_process[bpod_index].stop_acquisition()
+            if res:
+                self.camera_process[bpod_index] = None
         return res
 
     def _delete_logs(self):
@@ -663,7 +735,9 @@ class BpodAcademyServer:
         else:
             return None
 
-    def _start_bpod_protocol(self, bpod_id, protocol, subject, settings=None, camera=None):
+    def _start_bpod_protocol(
+        self, bpod_id, protocol, subject, settings=None, camera=None
+    ):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
         settings = settings if settings is not None else "DefaultSettings"
@@ -672,7 +746,9 @@ class BpodAcademyServer:
             fileparts = (self.bpod_dir, protocol, subject)
             camera_res = self._start_camera(bpod_id, camera, fileparts)
             if camera_res <= 0:
-                BpodAcademyError(f"Error starting video for Bpod {bpod_id}, Camera {camera}")
+                BpodAcademyError(
+                    f"Error starting video for Bpod {bpod_id}, Camera {camera}"
+                )
 
         res = self.bpod_process[bpod_index].send_command(
             ("RUN", protocol, subject, settings)
@@ -680,7 +756,9 @@ class BpodAcademyServer:
 
         if (res is not None) and (res[0] == "RUN"):
             if res[1] == 1:
-                self.publish.send_pyobj(("RUN", bpod_id, protocol, subject, settings, camera))
+                self.publish.send_pyobj(
+                    ("RUN", bpod_id, protocol, subject, settings, camera)
+                )
             return res[1]
         else:
             return None
@@ -705,8 +783,14 @@ class BpodAcademyServer:
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
 
-        res = self.bpod_process[bpod_index].send_command(("STOP",))        
-        camera_res = self.bpod_process[bpod_index].stop_camera(stop_camera_write_only)
+        res = self.bpod_process[bpod_index].send_command(("STOP",))
+        if self.camera_process[bpod_index] is not None:
+            if stop_camera_write_only:
+                camera_res = self.camera_process[bpod_index].stop_write()
+            else:
+                camera_res = self.camera_process[bpod_index].stop_acquisition()
+        else:
+            camera_res = 0
 
         if (res is not None) and (res[0] == "STOP"):
             if res[1] == 1:

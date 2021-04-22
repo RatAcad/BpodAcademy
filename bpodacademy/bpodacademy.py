@@ -169,7 +169,8 @@ class BpodAcademy(Tk):
                     parent=self,
                 )
             else:
-                self.cfg = reply
+                self.cfg = reply[0]
+                self.cameras = reply[1]
                 if window is not None:
                     window.destroy()
                     window.quit()
@@ -284,11 +285,13 @@ class BpodAcademy(Tk):
     def _add_box(self, bpod_id, bpod_serial, position):
 
         status = self._remote_to_server(("BPOD", "QUERY", bpod_id))
+        camera_settings = self.cameras[bpod_id] if bpod_id in self.cameras else None
 
         self.bpod_frames.append(
             BpodFrame(
                 bpod_id,
                 bpod_serial,
+                camera_settings=camera_settings,
                 status=status,
                 request_socket=self.request,
                 subscribe_socket=self.subscribe,
@@ -829,10 +832,11 @@ class BpodAcademy(Tk):
                 parent=self,
             )
 
-    def _refresh_cameras(self, cameras):
+    def _update_camera_settings(self, bpod_id, camera_settings):
 
-        for i in range(len(self.bpod_frames)):
-            self.bpod_frames[i].set_cameras(cameras)
+        self.cameras[bpod_id] = camera_settings
+        bpod_index = self.cfg["bpod_ids"].index(bpod_id)
+        self.bpod_frames[bpod_index].camera_settings = camera_settings
 
     def _delete_logs_command(self):
 
@@ -919,8 +923,9 @@ class BpodAcademy(Tk):
 
             elif cmd[0] == "CAMERAS":
 
-                cameras = cmd[1]
-                self._refresh_cameras(cameras)
+                bpod_id = cmd[1]
+                camera_settings = cmd[2]
+                self._update_camera_settings(bpod_id, camera_settings)
 
             elif cmd[0] == "START":
 
