@@ -1,4 +1,5 @@
 from serial.tools import list_ports
+import platform
 import os
 from pathlib import Path
 import zmq
@@ -31,11 +32,14 @@ class BpodAcademyServer:
     def _get_bpod_ports():
 
         com_ports = list_ports.comports()
-        bpod_ports = [
-            (p.serial_number, p.device)
-            for p in com_ports
-            if p.manufacturer is not None and "duino" in p.manufacturer
-        ]
+        bpod_ports = []
+        for p in com_ports:
+            if platform.system() == "Windows":
+                if (p.description is not None) and ("USB Serial Device" in p.description):
+                    bpod_ports.append((p.serial_number, p.device))
+            else:
+                if (p.manufacturer is not None) and ("duino" in p.manufacturer):
+                    bpod_ports.append((p.serial_number, p.device))
 
         return bpod_ports
 

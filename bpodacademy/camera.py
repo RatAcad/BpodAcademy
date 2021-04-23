@@ -255,10 +255,9 @@ class BpodAcademyCamera(object):
             vw.release()
 
             # get sync times
-            self.q_cam_to_sync.put((self.sync_channel, frame_times[-1]))
-            print("video writer requested sync times")
-            sync_times = self.q_sync_to_cam.get()
-            print("video writer received sync times")
+            if self.sync_channel is not None:
+                self.q_cam_to_sync.put((self.sync_channel, frame_times[-1]))
+                sync_times = self.q_sync_to_cam.get()
 
             # save timestamps
             fn_ts = (

@@ -172,12 +172,8 @@ class BpodAcademyCameraSync(object):
 
     def get_sync_times(self, channel, max_time=np.inf, delete=True):
 
-        print(f"sync: getting sync times, max_time = {max_time}")
-
         channel_data = self.channel_events[channel].copy()
         sub_data = channel_data[channel_data[:, 3] < max_time]
-
-        print(f"sync dim = {channel_data.shape}, sub dim = {sub_data.shape}")
 
         if delete:
             self.channel_events[channel] = np.delete(

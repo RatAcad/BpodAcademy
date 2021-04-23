@@ -14,7 +14,12 @@ from tkinter.ttk import Combobox
 
 import os
 from pathlib import Path
+import pathlib
 import platform
+if platform.system() == "Windows":
+    pathlib.PosixPath = pathlib.WindowsPath
+else:
+    pathlib.WindowsPath = pathlib.PosixPath
 import shutil
 import csv
 from distutils.util import strtobool
@@ -29,7 +34,6 @@ from bpodacademy.exception import BpodAcademyError
 try:
     from bpodacademy.server import BpodAcademyServer
 except ModuleNotFoundError:
-    print("SERVER NOT FOUND")
     pass
 from bpodacademy.frame import BpodFrame
 
@@ -157,7 +161,9 @@ class BpodAcademy(Tk):
         self.subscribe.connect(f"tcp://{self.ip}:{self.port+1}")
 
         # look for connection
-        reply = self._remote_to_server(("CONFIG", "ACADEMY"), timeout=1000)
+        reply = self._remote_to_server(("CONFIG", "ACADEMY"), timeout=1000)            
+
+        print(reply)
 
         if test:
             return reply
