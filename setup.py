@@ -20,7 +20,7 @@ setuptools.setup(
         "kthread",
         "pyzmq",
         "pillow",
-        "cv2",
+        "opencv-python",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",

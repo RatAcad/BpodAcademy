@@ -29,6 +29,7 @@ from bpodacademy.exception import BpodAcademyError
 try:
     from bpodacademy.server import BpodAcademyServer
 except ModuleNotFoundError:
+    print("SERVER NOT FOUND")
     pass
 from bpodacademy.frame import BpodFrame
 
@@ -244,7 +245,10 @@ class BpodAcademy(Tk):
         menubar.add_cascade(label="Settings", menu=settings_menu)
 
         camera_menu = Menu(menubar, tearoff=0)
-        camera_menu.add_command(label="Refresh Cameras", command=self._refresh_cameras_command)
+        camera_menu.add_command(label="Sync Device", command=self._set_camera_sync)
+        camera_menu.add_command(
+            label="Refresh Cameras", command=self._refresh_cameras_command
+        )
         menubar.add_cascade(label="Cameras", menu=camera_menu)
 
         logs_menu = Menu(menubar, tearoff=0)
@@ -822,6 +826,85 @@ class BpodAcademy(Tk):
         if window is not None:
             window.destroy()
 
+    def _set_camera_sync(self):
+
+        # check if protocols are running
+        running = False
+        for i in range(len(self.bpod_frames)):
+            if self.bpod_frames[i].status == 2:
+                running = True
+
+        if running:
+            messagebox.showwarning(
+                "Protocol Running!",
+                "Please shut down all protocols to edit the camera sync device.",
+                parent=self,
+            )
+
+        else:
+
+            teensy_ports = self._remote_to_server(("PORTS",))
+            if teensy_ports is None:
+                BpodAcademyError("Error fetching Ports from server!")
+            teensy_serials = [p[0] for p in teensy_ports]
+
+            camera_sync_window = Toplevel(self)
+            camera_sync_window.title("Set Camera Sync Device")
+            Label(camera_sync_window, text="Serial #: ").grid(
+                sticky="w", row=0, column=0
+            )
+            camera_sync_var = StringVar(
+                camera_sync_window, value=self.cameras["CameraSync"]
+            )
+            camera_sync_entry = Combobox(
+                camera_sync_window,
+                textvariable=camera_sync_var,
+                values=teensy_serials,
+                state="readonly",
+                width=BpodAcademy.GRID_WIDTH,
+            )
+
+            def _update_sync_serial(event=None):
+                self.cameras["CameraSync"] = int(camera_sync_var.get())
+
+            camera_sync_entry.bind("<<ComboboxSelected>>", _update_sync_serial)
+            camera_sync_entry.grid(sticky="nsew", row=0, column=1)
+            Button(
+                camera_sync_window, text="Connect", command=self._connect_camera_sync
+            ).grid(sticky="nsew", row=1, column=1)
+            Button(
+                camera_sync_window,
+                text="Disconnect",
+                command=self._disconnect_camera_sync,
+            ).grid(sticky="nsew", row=2, column=1)
+            Button(
+                camera_sync_window, text="Close", command=camera_sync_window.destroy
+            ).grid(sticky="nsew", row=3, column=1)
+
+            self.wait_window(camera_sync_window)
+
+    def _connect_camera_sync(self):
+
+        reply = self._remote_to_server(
+            ("CAMERAS", "SYNC", True, self.cameras["CameraSync"])
+        )
+        if not reply:
+            messagebox.showwarning(
+                "Failed to connect!",
+                "Failed to connect to the camera sync device!",
+                parent=self,
+            )
+
+    def _disconnect_camera_sync(self):
+
+        reply = self._remote_to_server(("CAMERAS", "SYNC", False))
+        if not reply:
+            messagebox.showwarning(
+                "Failed to disconnect!",
+                "Failed to disconnect from the camera sync device!",
+                parent=self,
+            )
+
     def _refresh_cameras_command(self):
 
         reply = self._remote_to_server(("CAMERAS", "REFRESH"))
@@ -878,7 +961,9 @@ class BpodAcademy(Tk):
     def _start_bpod_protocol(self, bpod_id, protocol, subject, settings, camera):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
-        self.bpod_frames[bpod_index].start_bpod_protocol(protocol, subject, settings, camera)
+        self.bpod_frames[bpod_index].start_bpod_protocol(
+            protocol, subject, settings, camera
+        )
 
     def _stop_bpod_protocol(self, bpod_id):
 

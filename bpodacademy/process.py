@@ -193,7 +193,7 @@ class BpodProcess:
 
         else:
 
-            return 2
+            return -1
 
     def _run_protocol_on_thread(self, protocol, subject, settings):
 

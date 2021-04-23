@@ -3,16 +3,20 @@ import os
 from pathlib import Path
 import zmq
 import threading
+import multiprocess as mp
 from multiprocess.pool import ThreadPool
+from multiprocess.queues import Queue
 import csv
 from scipy.io import savemat
 import shutil
 import traceback
 import cv2
+import time
 
 from bpodacademy.exception import BpodAcademyError
 from bpodacademy.process import BpodProcess
 from bpodacademy.camera import BpodAcademyCamera
+from bpodacademy.sync import BpodAcademyCameraSync
 
 
 class BpodAcademyServer:
@@ -74,6 +78,7 @@ class BpodAcademyServer:
         self.camera_process = [None for bpod_id in self.cfg["bpod_ids"]]
         self.bpod_ports = BpodAcademyServer._get_bpod_ports()
         self.camera_devices = BpodAcademyServer._get_cameras()
+        self.camera_sync = None
 
         context = zmq.Context()
         self.reply = context.socket(zmq.REP)
@@ -106,23 +111,28 @@ class BpodAcademyServer:
             "bpod_status": bpod_status,
         }
 
-        self.cameras = {}
+        self.cameras = {"CameraSync": None}
 
         if os.path.isfile(self.cfg_file_camera):
 
             cfg_reader = csv.reader(open(self.cfg_file_camera, newline=""))
             for i in cfg_reader:
-                this_camera = {
-                    i[0]: {
-                        "device": i[1],
-                        "width": int(i[2]) if i[2] else None,
-                        "height": int(i[3]) if i[3] else None,
-                        "fps": int(i[4]) if i[4] else None,
-                        "exposure": int(i[5]) if i[5] else None,
-                        "gain": int(i[6]) if i[6] else None,
+
+                if i[0] == "CameraSync":
+                    self.cameras["CameraSync"] = int(i[1]) if i[1] else None
+                else:
+                    this_camera = {
+                        i[0]: {
+                            "device": i[1],
+                            "width": int(i[2]) if i[2] else None,
+                            "height": int(i[3]) if i[3] else None,
+                            "fps": int(i[4]) if i[4] else None,
+                            "exposure": int(i[5]) if i[5] else None,
+                            "gain": int(i[6]) if i[6] else None,
+                            "sync_channel": int(i[7]) if i[7] else None,
+                        }
                     }
-                }
-                self.cameras.update(this_camera)
+                    self.cameras.update(this_camera)
 
     def _save_config(self):
 
@@ -133,19 +143,22 @@ class BpodAcademyServer:
             cfg_writer.writerow([n, s, p[0], p[1]])
 
         cfg_camera_writer = csv.writer(open(self.cfg_file_camera, "w", newline=""))
+        cfg_camera_writer.writerow(["CameraSync", self.cameras["CameraSync"]])
         for i in self.cameras:
-            cam = self.cameras[i]
-            cfg_camera_writer.writerow(
-                [
-                    i,
-                    cam["device"],
-                    cam["width"],
-                    cam["height"],
-                    cam["fps"],
-                    cam["exposure"],
-                    cam["gain"],
-                ]
-            )
+            if i != "CameraSync":
+                cam = self.cameras[i]
+                cfg_camera_writer.writerow(
+                    [
+                        i,
+                        cam["device"],
+                        cam["width"],
+                        cam["height"],
+                        cam["fps"],
+                        cam["exposure"],
+                        cam["gain"],
+                        cam["sync_channel"],
+                    ]
+                )
 
     def start(self):
 
@@ -305,6 +318,17 @@ class BpodAcademyServer:
                             res = self._stop_camera(bpod_id)
                             self.reply.send_pyobj(res)
 
+                        elif cmd[1] == "SYNC":
+
+                            connect = cmd[2]
+                            if connect:
+                                sync_serial = cmd[3]
+                                res = self._connect_camera_sync(sync_serial)
+                                self.reply.send_pyobj(res)
+                            else:
+                                res = self._disconnect_camera_sync()
+                                self.reply.send_pyobj(res)
+
                     elif cmd[0] == "LOGS":
 
                         if cmd[1] == "DELETE":
@@ -404,6 +428,8 @@ class BpodAcademyServer:
 
     def stop(self):
 
+        if self.camera_sync is not None:
+            self.camera_sync.stop_sync_device()
         self.server_open = False
         self.command_thread.join()
 
@@ -518,7 +544,7 @@ class BpodAcademyServer:
                 else:
                     self.camera_process[bpod_index].stop_acquisition()
                     self.camera_process[bpod_index] = None
-            
+
         if self.camera_process[bpod_index] is None:
             self.camera_process[bpod_index] = BpodAcademyCamera(
                 camera_settings["device"],
@@ -527,16 +553,29 @@ class BpodAcademyServer:
                 camera_settings["fps"],
                 camera_settings["exposure"],
                 camera_settings["gain"],
+                camera_settings["sync_channel"],
             )
 
-            res = self.camera_process[bpod_index].start_acquisition(fileparts)
+            res = self.camera_process[bpod_index].start_acquisition()
+            if res <= 0:
+                return res
+
+        if fileparts is not None:
+            res = self.camera_sync.start_sync_channel(
+                camera_settings["sync_channel"],
+                self.camera_process[bpod_index].q_cam_to_sync,
+                self.camera_process[bpod_index].q_sync_to_cam,
+            )
+            if not res:
+                return -3
+
+            res = self.camera_process[bpod_index].start_write(fileparts)
+            if not res:
+                return -2
 
         else:
 
-            if fileparts is not None:
-                res = self.camera_process[bpod_index].start_write(fileparts)
-            else:
-                res = 1
+            res = 1
 
         return res
 
@@ -556,6 +595,40 @@ class BpodAcademyServer:
             res = self.camera_process[bpod_index].stop_acquisition()
             if res:
                 self.camera_process[bpod_index] = None
+        return res
+
+    def _connect_camera_sync(self, sync_serial):
+
+        if sync_serial != self.cameras["CameraSync"]:
+            self.cameras["CameraSync"] = sync_serial
+            self.publish.send_pyobj(("CAMERAS", "SYNC", sync_serial))
+            self._save_config()
+
+            if self.camera_sync is not None:
+                self._disconnect_camera_sync()
+
+        if self.camera_sync is None:
+            all_ports = BpodAcademyServer._get_bpod_ports()
+            sync_serial_port = [p[1] for p in all_ports if int(p[0]) == sync_serial][0]
+            self.camera_sync = BpodAcademyCameraSync(sync_serial_port)
+            res = self.camera_sync.start_sync_device()
+        else:
+            res = self.camera_sync.sync_active
+
+        return res
+
+    def _disconnect_camera_sync(self):
+
+        if self.camera_sync is not None:
+            if self.camera_sync.sync_active:
+                res = self.camera_sync.stop_sync_device()
+                if res:
+                    self.camera_sync = None
+            else:
+                res = True
+        else:
+            res = True
+
         return res
 
     def _delete_logs(self):
@@ -622,6 +695,8 @@ class BpodAcademyServer:
         cfg_writer = csv.writer(open(training_config_file, "w", newline=""))
         for id, pro, sub, set in zip(bpod_ids, protocols, subjects, settings):
             cfg_writer.writerow([id, pro, sub, set])
+
+        return True
 
     def _get_training_configs(self):
 
@@ -743,12 +818,16 @@ class BpodAcademyServer:
         settings = settings if settings is not None else "DefaultSettings"
 
         if (camera is not None) and (camera != ""):
+            sync_on = (
+                self.camera_sync.sync_active if self.camera_sync is not None else False
+            )
+            if not sync_on:
+                return -3
+
             fileparts = (self.bpod_dir, protocol, subject)
             camera_res = self._start_camera(bpod_id, camera, fileparts)
             if camera_res <= 0:
-                BpodAcademyError(
-                    f"Error starting video for Bpod {bpod_id}, Camera {camera}"
-                )
+                return camera_res - 2
 
         res = self.bpod_process[bpod_index].send_command(
             ("RUN", protocol, subject, settings)
@@ -781,14 +860,23 @@ class BpodAcademyServer:
 
     def _stop_bpod_protocol(self, bpod_id, stop_camera_write_only=False):
 
+        print("STOPPING PROTOCOL")
+
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
 
         res = self.bpod_process[bpod_index].send_command(("STOP",))
+
+        time.sleep(0.25)
+
         if self.camera_process[bpod_index] is not None:
-            if stop_camera_write_only:
-                camera_res = self.camera_process[bpod_index].stop_write()
-            else:
-                camera_res = self.camera_process[bpod_index].stop_acquisition()
+            sync_res = self.camera_sync.stop_sync_channel(
+                int(self.cameras[bpod_id]["sync_channel"])
+            )
+            camera_res = self._stop_camera(bpod_id, stop_camera_write_only)
+            # if stop_camera_write_only:
+            #     camera_res = self.camera_process[bpod_index].stop_write()
+            # else:
+            #     camera_res = self.camera_process[bpod_index].stop_acquisition()
         else:
             camera_res = 0
 

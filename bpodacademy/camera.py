@@ -9,13 +9,23 @@ from queue import Empty
 from pathlib import Path
 import datetime
 
+
 class BpodAcademyCamera(object):
 
-    CAMERA_DISPLAY_MAX_WIDTH=320
-    WAIT_CAMERA_SEC=10
-    WAIT_WRITER_SEC=5
+    CAMERA_DISPLAY_MAX_WIDTH = 320
+    WAIT_CAMERA_SEC = 10
+    WAIT_WRITER_SEC = 5
 
-    def __init__(self, device, width=640, height=480, fps=None, exposure=None, gain=None):
+    def __init__(
+        self,
+        device,
+        width=640,
+        height=480,
+        fps=None,
+        exposure=None,
+        gain=None,
+        sync_channel=None,
+    ):
 
         try:
             self.device = int(device)
@@ -27,30 +37,34 @@ class BpodAcademyCamera(object):
         self.exposure = exposure
         self.gain = gain
 
+        self.sync_channel = sync_channel
+
         self.resolution_display = (
-                self.resolution
-                if self.resolution[0] <= int(BpodAcademyCamera.CAMERA_DISPLAY_MAX_WIDTH)
-                else (
-                    int(BpodAcademyCamera.CAMERA_DISPLAY_MAX_WIDTH),
-                    int(
-                        BpodAcademyCamera.CAMERA_DISPLAY_MAX_WIDTH
-                        / (self.resolution[0] / self.resolution[1])
-                    ),
-                )
+            self.resolution
+            if self.resolution[0] <= int(BpodAcademyCamera.CAMERA_DISPLAY_MAX_WIDTH)
+            else (
+                int(BpodAcademyCamera.CAMERA_DISPLAY_MAX_WIDTH),
+                int(
+                    BpodAcademyCamera.CAMERA_DISPLAY_MAX_WIDTH
+                    / (self.resolution[0] / self.resolution[1])
+                ),
             )
+        )
 
         self.frame_shared = mp.Array(
             ctypes.c_uint8, self.resolution_display[1] * self.resolution_display[0] * 3
         )
-        self.frame = np.frombuffer(
-            self.frame_shared.get_obj(), dtype="uint8"
-        ).reshape(self.resolution_display[1], self.resolution_display[0], 3)
+        self.frame = np.frombuffer(self.frame_shared.get_obj(), dtype="uint8").reshape(
+            self.resolution_display[1], self.resolution_display[0], 3
+        )
 
         self.ctx = mp.get_context("spawn")
+        self.q_cam_to_sync = Queue(ctx=self.ctx)
+        self.q_sync_to_cam = Queue(ctx=self.ctx)
 
         self.acquisition_on = False
 
-    def start_acquisition(self, fileparts=None):
+    def start_acquisition(self):
 
         self.acquisition_on = True
 
@@ -58,9 +72,7 @@ class BpodAcademyCamera(object):
         self.q_main_to_cam = Queue(ctx=self.ctx)
 
         self.cam_proc = self.ctx.Process(
-            target=self._run_camera_process,
-            args=(self.frame_shared, fileparts),
-            daemon=True,
+            target=self._run_camera_process, args=(self.frame_shared,), daemon=True,
         )
         self.cam_proc.start()
 
@@ -84,9 +96,8 @@ class BpodAcademyCamera(object):
 
         return res
 
+    def _run_camera_process(self, frame_shared):
 
-    def _run_camera_process(self, frame_shared, fileparts=None):
-        
         self.frame = np.frombuffer(frame_shared.get_obj(), dtype="uint8").reshape(
             self.resolution_display[1], self.resolution_display[0], 3
         )
@@ -97,20 +108,20 @@ class BpodAcademyCamera(object):
         # setup camera acquisition and write threads
         self.frame_queue = Queue(ctx=self.ctx)
         self.camera_acquire = True
-        self.camera_write = fileparts is not None
+        self.camera_write = False
 
         # start camera acquisition thread and write thread (if fileparts provided)
         self.camera_acquire_thread = threading.Thread(
             target=self._acquire_on_thread, daemon=True
         )
 
-        if fileparts is not None:
-            self.camera_write_thread = threading.Thread(
-                target=self._write_on_thread, args=(fileparts,), daemon=True
-            )
-            self.camera_write_thread.start()
-        else:
-            self.camera_write_thread = None
+        # if fileparts is not None:
+        #     self.camera_write_thread = threading.Thread(
+        #         target=self._write_on_thread, args=(fileparts,), daemon=True
+        #     )
+        #     self.camera_write_thread.start()
+        # else:
+        #     self.camera_write_thread = None
 
         self.camera_acquire_thread.start()
 
@@ -126,15 +137,27 @@ class BpodAcademyCamera(object):
                     self.camera_write = True
                     fileparts = cmd[2]
                     self.camera_write_thread = threading.Thread(
-                        target=self._write_on_thread, args=(fileparts,), daemon=True
+                        target=self._write_on_thread,
+                        args=(fileparts,),
+                        daemon=True,
                     )
                     self.camera_write_thread.start()
+
+                    while not self.camera_write:
+                        pass
+
+                    self.q_cam_to_main.put(True)
 
                 elif (not cmd[1]) and (self.camera_write):
 
                     self.camera_write = False
                     self.camera_write_thread.join()
                     self.camera_write_thread = None
+                    self.q_cam_to_main.put(True)
+
+                elif (not cmd[1]):
+
+                    self.q_cam_to_main.put(True)
 
             elif cmd[0] == "ACQUIRE":
 
@@ -152,10 +175,10 @@ class BpodAcademyCamera(object):
         self.cap.release()
 
     def _initialize_camera(self):
-  
+
         # connect to camera, get first image
         self.cap = cv2.VideoCapture(self.device)
-        
+
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
 
@@ -166,11 +189,11 @@ class BpodAcademyCamera(object):
 
         if self.exposure is not None:
             self.cap.set(cv2.CAP_PROP_EXPOSURE, self.exposure)
-        
+
         if self.gain is not None:
             self.cap.set(cv2.CAP_PROP_GAIN, self.gain)
 
-        ret, frame = self.cap.read()
+        ret, _ = self.cap.read()
 
         return ret
 
@@ -210,9 +233,10 @@ class BpodAcademyCamera(object):
 
             # create video writer and timestamp list
             fps = int(self.cap.get(cv2.CAP_PROP_FPS))
-            vw = cv2.VideoWriter(str(fn_vid), cv2.VideoWriter_fourcc(*"DIVX"), fps, self.resolution)
+            vw = cv2.VideoWriter(
+                str(fn_vid), cv2.VideoWriter_fourcc(*"DIVX"), fps, self.resolution
+            )
             frame_times = []
-            sync_times = []
 
             while (self.camera_write) and (
                 (datetime.datetime.now() - start_camera_time)
@@ -227,15 +251,23 @@ class BpodAcademyCamera(object):
                 except Empty:
                     pass
 
+            # release video writer (save video)
             vw.release()
 
+            # get sync times
+            self.q_cam_to_sync.put((self.sync_channel, frame_times[-1]))
+            print("video writer requested sync times")
+            sync_times = self.q_sync_to_cam.get()
+            print("video writer received sync times")
+
+            # save timestamps
             fn_ts = (
                 base_dir
                 / "Timestamps"
                 / f"{subject}_{protocol}_{start_camera_time_str}.npz"
             )
             fn_ts.parent.mkdir(parents=True, exist_ok=True)
-            np.savez(fn_ts, np.array(frame_times), np.array(sync_times))
+            np.savez(fn_ts, frame_times=np.array(frame_times), sync_times=np.array(sync_times))
 
             # update time for next recording
             start_camera_time = start_camera_time + datetime.timedelta(hours=1)
@@ -292,4 +324,3 @@ class BpodAcademyCamera(object):
         else:
 
             return 0
-

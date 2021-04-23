@@ -429,16 +429,40 @@ class BpodFrame(tk.Frame):
 
                 if reply is None:
                     self._no_server_message("RUN")
-                elif reply <= 0:
+                elif reply == 0:
                     tk.messagebox.showwarning(
                         "Protocol did not start!",
                         f"Protocol failed to start on {self.bpod_id}! Please check the log for error messages.",
                         parent=self,
                     )
-                elif reply == 2:
+                elif reply == -1:
                     tk.messagebox.showwarning(
                         "Protocol did not start!",
                         f"Protocol failed to start on {self.bpod_id}! Please check if a protocol is currently running.",
+                        parent=self,
+                    )
+                elif reply == -2:
+                    tk.messagebox.showwarning(
+                        "Failed to start camera!",
+                        f"Failed to start camera for {self.bpod_id}!",
+                        parent=self,
+                    )
+                elif reply == -3:
+                    tk.messagebox.showwarning(
+                        "Failed to start camera!",
+                        f"Failed to start camera for {self.bpod_id}!",
+                        parent=self,
+                    )
+                elif reply == -4:
+                    tk.messagebox.showwarning(
+                        "Failed to start camera!",
+                        f"Failed to start camera writer for {self.bpod_id}!",
+                        parent=self,
+                    )
+                elif reply == -5:
+                    tk.messagebox.showwarning(
+                        "Failed to start camera!",
+                        f"Failed to start camera sync for {self.bpod_id}!",
                         parent=self,
                     )
 
@@ -547,6 +571,7 @@ class BpodFrame(tk.Frame):
                 "fps": 30,
                 "exposure": None,
                 "gain": None,
+                "sync_channel": None,
             }
         )
 
@@ -561,6 +586,7 @@ class BpodFrame(tk.Frame):
             "fps": {"value": default_camera_settings["fps"], "dtype": int},
             "exposure": {"value": default_camera_settings["exposure"], "dtype": int},
             "gain": {"value": default_camera_settings["gain"], "dtype": int},
+            "sync_channel": {"value": default_camera_settings["sync_channel"], "dtype": int, "restriction": [i for i in range(13)]}
         }
 
         camera_settings_window = SettingsWindow(
