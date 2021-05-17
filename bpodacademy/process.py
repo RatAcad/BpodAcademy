@@ -2,6 +2,9 @@ import multiprocess as mp
 from multiprocess.queues import Queue
 from queue import Empty
 import kthread
+import cv2
+import ctypes
+import numpy as np
 
 from pathlib import Path
 import datetime
@@ -190,7 +193,7 @@ class BpodProcess:
 
         else:
 
-            return 2
+            return -1
 
     def _run_protocol_on_thread(self, protocol, subject, settings):
 

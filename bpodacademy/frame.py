@@ -2,9 +2,11 @@ import tkinter as tk
 from tkinter import ttk
 import os
 import zmq
+from PIL import Image, ImageTk
 import serial.tools.list_ports as list_ports
 
-from bpodacademy import BpodAcademyError
+from bpodacademy.utils.tkutil import SettingsWindow
+from bpodacademy.exception import BpodAcademyError
 
 
 class BpodFrame(tk.Frame):
@@ -23,6 +25,7 @@ class BpodFrame(tk.Frame):
         self,
         bpod_id,
         serial_number,
+        camera_settings=None,
         status=(0,),
         request_socket=None,
         subscribe_socket=None,
@@ -44,6 +47,7 @@ class BpodFrame(tk.Frame):
             )
         else:
             self.protocol_details = (None, None, None)
+        self.camera_settings = camera_settings
 
         self.remote = remote
 
@@ -64,6 +68,7 @@ class BpodFrame(tk.Frame):
             self.subscribe = subscribe_socket
 
         self.bpod_ports = self._get_bpod_ports()
+        self.camera_window = None
 
         self.create_frame()
 
@@ -131,6 +136,15 @@ class BpodFrame(tk.Frame):
         else:
             self._no_server_message("SETTINGS")
 
+    def _get_cameras(self, event=None):
+
+        camera_list = self._remote_to_server(("CAMERAS", "FETCH"))
+        return camera_list
+
+    def set_cameras(self, cameras):
+
+        self.camera_entry["values"] = [""] + cameras
+
     def create_frame(self):
 
         ### row 0: select port for box, add start button ###
@@ -139,14 +153,17 @@ class BpodFrame(tk.Frame):
             label_color = BpodFrame.OFF_COLOR
             serial_selection_state = "readonly"
             protocol_selection_state = "readonly"
+            camera_selection_state = "normal"
         elif self.status == 1:
             label_color = BpodFrame.READY_COLOR
             serial_selection_state = "disabled"
             protocol_selection_state = "readonly"
+            camera_selection_state = "normal"
         elif self.status == 2:
             label_color = BpodFrame.ON_COLOR
             serial_selection_state = "disabled"
             protocol_selection_state = "disabled"
+            camera_selection_state = "disabled"
 
         self.box_label = tk.Label(self, text=self.bpod_id, bg=label_color)
         self.box_label.grid(sticky="w", row=0, column=0)
@@ -238,6 +255,20 @@ class BpodFrame(tk.Frame):
 
         self.end_button = tk.Button(self, text="End Bpod", command=self._end_bpod)
         self.end_button.grid(sticky="nsew", row=3, column=2)
+
+        ### row 4: select camera, show camera
+
+        self.camera_label = tk.Label(self, text="Camera: ")
+        self.camera_label.grid(sticky="w", row=4, column=0)
+        self.camera_entry = tk.Button(
+            self, text="Camera Settings", command=self._edit_camera_settings
+        )
+        self.camera_entry.grid(sticky="nsew", row=4, column=1)
+
+        self.show_camera_button = tk.Button(
+            self, text="Show Video", command=self._toggle_video
+        )
+        self.show_camera_button.grid(sticky="nsew", row=4, column=2)
 
     def _change_port(self, event=None):
 
@@ -392,25 +423,50 @@ class BpodFrame(tk.Frame):
                         self.protocol.get(),
                         self.subject.get(),
                         self.settings.get(),
+                        self.camera_settings,
                     )
                 )
 
                 if reply is None:
                     self._no_server_message("RUN")
-                elif reply <= 0:
+                elif reply == 0:
                     tk.messagebox.showwarning(
                         "Protocol did not start!",
                         f"Protocol failed to start on {self.bpod_id}! Please check the log for error messages.",
                         parent=self,
                     )
-                elif reply == 2:
+                elif reply == -1:
                     tk.messagebox.showwarning(
                         "Protocol did not start!",
                         f"Protocol failed to start on {self.bpod_id}! Please check if a protocol is currently running.",
                         parent=self,
                     )
+                elif reply == -2:
+                    tk.messagebox.showwarning(
+                        "Failed to start camera!",
+                        f"Failed to start camera for {self.bpod_id}!",
+                        parent=self,
+                    )
+                elif reply == -3:
+                    tk.messagebox.showwarning(
+                        "Failed to start camera!",
+                        f"Failed to start camera for {self.bpod_id}!",
+                        parent=self,
+                    )
+                elif reply == -4:
+                    tk.messagebox.showwarning(
+                        "Failed to start camera!",
+                        f"Failed to start camera writer for {self.bpod_id}!",
+                        parent=self,
+                    )
+                elif reply == -5:
+                    tk.messagebox.showwarning(
+                        "Failed to start camera!",
+                        f"Failed to start camera sync for {self.bpod_id}!",
+                        parent=self,
+                    )
 
-    def start_bpod_protocol(self, protocol, subject, settings):
+    def start_bpod_protocol(self, protocol, subject, settings, camera):
 
         self.check_protocol = self.after(
             BpodFrame.CHECK_PROTOCOL_MS, self._check_running_protocol
@@ -423,6 +479,7 @@ class BpodFrame(tk.Frame):
         self.protocol_entry["state"] = "disabled"
         self.subject_entry["state"] = "disabled"
         self.settings_entry["state"] = "disabled"
+        self.camera_entry["state"] = "disabled"
 
     def _check_running_protocol(self):
 
@@ -453,7 +510,11 @@ class BpodFrame(tk.Frame):
 
         else:
 
-            reply = self._remote_to_server(("BPOD", "STOP", self.bpod_id))
+            stop_camera_write_only = self.camera_window is not None
+
+            reply = self._remote_to_server(
+                ("BPOD", "STOP", self.bpod_id, stop_camera_write_only)
+            )
 
             if reply is None:
                 self._no_server_message("STOP")
@@ -472,6 +533,8 @@ class BpodFrame(tk.Frame):
         self.protocol_entry["state"] = "readonly"
         self.subject_entry["state"] = "readonly"
         self.settings_entry["state"] = "readonly"
+        if self.camera_window is None:
+            self.camera_entry["state"] = "normal"
 
     def _end_bpod(self):
 
@@ -496,3 +559,119 @@ class BpodFrame(tk.Frame):
         self.box_label["bg"] = BpodFrame.OFF_COLOR
         self.serial_entry["state"] = "readonly"
 
+    def _edit_camera_settings(self):
+
+        default_camera_settings = (
+            self.camera_settings
+            if self.camera_settings
+            else {
+                "device": "",
+                "width": 640,
+                "height": 480,
+                "fps": 30,
+                "exposure": None,
+                "gain": None,
+                "sync_channel": None,
+            }
+        )
+
+        camera_settings_options = {
+            "device": {
+                "value": default_camera_settings["device"],
+                "dtype": str,
+                "restriction": [""] + self._get_cameras(),
+            },
+            "width": {"value": default_camera_settings["width"], "dtype": int},
+            "height": {"value": default_camera_settings["height"], "dtype": int},
+            "fps": {"value": default_camera_settings["fps"], "dtype": int},
+            "exposure": {"value": default_camera_settings["exposure"], "dtype": int},
+            "gain": {"value": default_camera_settings["gain"], "dtype": int},
+            "sync_channel": {"value": default_camera_settings["sync_channel"], "dtype": int, "restriction": [i for i in range(13)]}
+        }
+
+        camera_settings_window = SettingsWindow(
+            title="Edit Camera Settings", settings=camera_settings_options, parent=self
+        )
+        self.wait_window(camera_settings_window)
+
+        self.camera_settings = camera_settings_window.get_values()
+
+        self._remote_to_server(("CAMERAS", "EDIT", self.bpod_id, self.camera_settings))
+
+    def _toggle_video(self):
+
+        if self.camera_window:
+
+            self._close_camera_window()
+
+            if self.status < 2:
+                res = self._remote_to_server(("CAMERAS", "STOP", self.bpod_id))
+                if res < 0:
+                    BpodAcademyError(
+                        f"Error stopping camera for Bpod: {self.bpod_id}, Camera ID: {self.camera_settings['device']}"
+                    )
+                else:
+                    self.camera_entry["state"] = "normal"
+
+            self.show_camera_button["text"] = "Show Video"
+
+        else:
+
+            res = self._remote_to_server(
+                ("CAMERAS", "START", self.bpod_id, self.camera_settings)
+            )
+
+            if res > 0:
+                self._open_camera_window()
+                self.show_camera_button["text"] = "Hide Video"
+                self.camera_entry["state"] = "disabled"
+            elif res == -2:
+                tk.messagebox.showwarning(
+                    "No Camera Selected!",
+                    "Please select a camera to show video!",
+                    parent=self,
+                )
+            elif res == -3:
+                tk.messagebox.showwarning(
+                    "Camera already initialized!",
+                    "Cannot change cameras during a protocol. Please stop the running protocol before editing the camera.",
+                )
+            elif res <= 0:
+                BpodAcademyError(
+                    f"Error starting camera for Bpod: {self.bpod_id}, Camera ID: {self.camera_settings['device']}"
+                )
+
+    def _open_camera_window(self):
+
+        self.camera_window = tk.Toplevel(self)
+        self.camera_window.title(
+            f"Bpod: {self.bpod_id}, Camera: {self.camera_settings['device']}"
+        )
+        self.camera_display_label = tk.Label(self.camera_window)
+        self.camera_display_label.pack()
+        self._display_camera_image()
+
+    def _display_camera_image(self):
+
+        if self.camera_window:
+
+            frame = self._remote_to_server(("CAMERAS", "IMAGE", self.bpod_id))
+
+            if frame is not None:
+
+                img = Image.fromarray(frame)
+
+                if frame.ndim == 3:
+                    b, g, r = img.split()
+                    img = Image.merge("RGB", (r, g, b))
+
+                imgtk = ImageTk.PhotoImage(image=img)
+                self.camera_display_label.imgtk = imgtk
+                self.camera_display_label.configure(image=imgtk)
+
+            self.camera_display_label.after(30, self._display_camera_image)
+
+    def _close_camera_window(self):
+
+        self.camera_window.destroy()
+        self.camera_window = None
