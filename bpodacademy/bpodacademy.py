@@ -163,8 +163,6 @@ class BpodAcademy(Tk):
         # look for connection
         reply = self._remote_to_server(("CONFIG", "ACADEMY"), timeout=1000)            
 
-        print(reply)
-
         if test:
             return reply
         else:
@@ -176,8 +174,12 @@ class BpodAcademy(Tk):
                     parent=self,
                 )
             else:
-                self.cfg = reply[0]
-                self.cameras = reply[1]
+                if type(reply) is tuple:
+                    self.cfg = reply[0]
+                    self.cameras = reply[1]
+                else:
+                    self.cfg = reply
+                    self.cameras = None
                 if window is not None:
                     window.destroy()
                     window.quit()
@@ -295,7 +297,8 @@ class BpodAcademy(Tk):
     def _add_box(self, bpod_id, bpod_serial, position):
 
         status = self._remote_to_server(("BPOD", "QUERY", bpod_id))
-        camera_settings = self.cameras[bpod_id] if bpod_id in self.cameras else None
+        camera_settings = self.cameras[bpod_id] if (self.cameras is not None) and (bpod_id in self.cameras) else None
+
 
         self.bpod_frames.append(
             BpodFrame(
@@ -699,7 +702,7 @@ class BpodAcademy(Tk):
         )
 
         def update_settings_subject(event=None):
-            settings_subject_entry["values"] = self._remote_to_server(
+            settings_subject_entry["values"] = ["All"] + self._remote_to_server(
                 ("SUBJECTS", "FETCH", settings_protocol.get())
             )
             settings_subject.set("")
@@ -1030,7 +1033,7 @@ class BpodAcademy(Tk):
                 protocol = cmd[2]
                 subject = cmd[3]
                 settings = cmd[4]
-                camera = cmd[5]
+                camera = cmd[5] if len(cmd) > 5 else None
                 self._start_bpod_protocol(bpod_id, protocol, subject, settings, camera)
 
             elif cmd[0] == "STOP":

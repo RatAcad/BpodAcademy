@@ -504,32 +504,46 @@ class BpodAcademyServer:
         self, from_protocol, from_subject, from_settings, to_protocol, to_subject
     ):
 
+        to_subject = [to_subject] if to_subject != "All" else self._load_subjects(to_protocol)
+        to_subject.remove(from_subject)
+        
         copy_from = Path(
             f"{self.bpod_dir}/Data/{from_subject}/{from_protocol}/Session Settings/{from_settings}.mat"
-        )
-        copy_to = Path(
-            f"{self.bpod_dir}/Data/{to_subject}/{to_protocol}/Session Settings/{from_settings}.mat"
         )
 
         ### check that copy_from exists
         if not copy_from.is_file():
             return False
+        
+        for ts in to_subject:
 
-        shutil.copy(copy_from, copy_to)
+            copy_to = Path(
+                f"{self.bpod_dir}/Data/{ts}/{to_protocol}/Session Settings/{from_settings}.mat"
+            )
+
+            shutil.copy(copy_from, copy_to)
 
         return True
 
     def _create_settings_file(self, protocol, subject, settings_file, settings_dict):
 
-        full_file = Path(
-            f"{self.bpod_dir}/Data/{subject}/{protocol}/Session Settings/{settings_file}.mat"
-        )
-        savemat(full_file, {"ProtocolSettings": settings_dict})
+        subject = [subject] if subject != "All" else self._load_subjects(protocol)
+
+        for s in subject:
+            full_file = Path(
+                f"{self.bpod_dir}/Data/{s}/{protocol}/Session Settings/{settings_file}.mat"
+            )
+            savemat(full_file, {"ProtocolSettings": settings_dict})
+
         return True
 
     def _edit_camera_settings(self, bpod_id, camera_settings):
 
-        self.cameras[bpod_id] = camera_settings
+        if camera_settings["device"] is not None:
+            self.cameras[bpod_id] = camera_settings
+        else:
+            self.cameras.pop(bpod_id, None)
+        
         self._save_config()
         self.publish.send_pyobj(("CAMERAS", bpod_id, camera_settings))
 
