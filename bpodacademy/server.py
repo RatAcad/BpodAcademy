@@ -602,7 +602,9 @@ class BpodAcademyServer:
 
         else:
 
-            return 1
+            res = 1
+
+        return res
 
 
     def _get_camera_image(self, bpod_id):
@@ -843,6 +845,8 @@ class BpodAcademyServer:
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
         settings = settings if settings is not None else "DefaultSettings"
 
+        camera_res = 1
+        
         if (camera is not None) and (camera != ""):
             if protocol == camera["record_protocol"]:
                 if self.camera_sync is not None:
