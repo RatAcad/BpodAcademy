@@ -35,7 +35,9 @@ class BpodAcademyServer:
         bpod_ports = []
         for p in com_ports:
             if platform.system() == "Windows":
-                if (p.description is not None) and ("USB Serial Device" in p.description):
+                if (p.description is not None) and (
+                    "USB Serial Device" in p.description
+                ):
                     bpod_ports.append((p.serial_number, p.device))
             else:
                 if (p.manufacturer is not None) and ("duino" in p.manufacturer):
@@ -134,6 +136,7 @@ class BpodAcademyServer:
                             "exposure": int(i[5]) if i[5] else None,
                             "gain": int(i[6]) if i[6] else None,
                             "sync_channel": int(i[7]) if i[7] else None,
+                            "record_protocol": i[8] if (len(i) > 8 and i[8]) else None,
                         }
                     }
                     self.cameras.update(this_camera)
@@ -161,6 +164,7 @@ class BpodAcademyServer:
                         cam["exposure"],
                         cam["gain"],
                         cam["sync_channel"],
+                        cam["record_protocol"],
                     ]
                 )
 
@@ -504,9 +508,11 @@ class BpodAcademyServer:
         self, from_protocol, from_subject, from_settings, to_protocol, to_subject
     ):
 
-        to_subject = [to_subject] if to_subject != "All" else self._load_subjects(to_protocol)
+        to_subject = (
+            [to_subject] if to_subject != "All" else self._load_subjects(to_protocol)
+        )
         to_subject.remove(from_subject)
-        
+
         copy_from = Path(
             f"{self.bpod_dir}/Data/{from_subject}/{from_protocol}/Session Settings/{from_settings}.mat"
         )
@@ -514,7 +520,7 @@ class BpodAcademyServer:
         ### check that copy_from exists
         if not copy_from.is_file():
             return False
-        
+
         for ts in to_subject:
 
             copy_to = Path(
@@ -543,7 +549,7 @@ class BpodAcademyServer:
             self.cameras[bpod_id] = camera_settings
         else:
             self.cameras.pop(bpod_id, None)
-        
+
         self._save_config()
         self.publish.send_pyobj(("CAMERAS", bpod_id, camera_settings))
 
@@ -551,14 +557,14 @@ class BpodAcademyServer:
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
 
-        if (camera_settings is None) or (camera_settings["device"] == ""):
-            return -2
+        if (camera_settings is None) or (camera_settings["device"] is None):
+            return -5
 
         if self.camera_process[bpod_index] is not None:
 
             if camera_settings["device"] != str(self.camera_process[bpod_index].device):
                 if self._query_bpod_status(bpod_id)[0] == 2:
-                    return -3
+                    return -4
                 else:
                     self.camera_process[bpod_index].stop_acquisition()
                     self.camera_process[bpod_index] = None
@@ -579,12 +585,15 @@ class BpodAcademyServer:
                 return res
 
         if fileparts is not None:
-            res = self.camera_sync.start_sync_channel(
-                camera_settings["sync_channel"],
-                self.camera_process[bpod_index].q_cam_to_sync,
-                self.camera_process[bpod_index].q_sync_to_cam,
-            )
-            if not res:
+            if self.camera_sync is not None:
+                res = self.camera_sync.start_sync_channel(
+                    camera_settings["sync_channel"],
+                    self.camera_process[bpod_index].q_cam_to_sync,
+                    self.camera_process[bpod_index].q_sync_to_cam,
+                )
+                if not res:
+                    return -3
+            else:
                 return -3
 
             res = self.camera_process[bpod_index].start_write(fileparts)
@@ -593,9 +602,8 @@ class BpodAcademyServer:
 
         else:
 
-            res = 1
+            return 1
 
-        return res
 
     def _get_camera_image(self, bpod_id):
 
@@ -836,27 +844,46 @@ class BpodAcademyServer:
         settings = settings if settings is not None else "DefaultSettings"
 
         if (camera is not None) and (camera != ""):
-            sync_on = (
-                self.camera_sync.sync_active if self.camera_sync is not None else False
-            )
-            if not sync_on:
-                return -3
+            if protocol == camera["record_protocol"]:
+                if self.camera_sync is not None:
+                    sync_on = (
+                        self.camera_sync.sync_active if self.camera_sync is not None else False
+                    )
+                else:
+                    sync_on = False
+                sync_res = -5 if not sync_on else 1
 
-            fileparts = (self.bpod_dir, protocol, subject)
-            camera_res = self._start_camera(bpod_id, camera, fileparts)
-            if camera_res <= 0:
-                return camera_res - 2
+                fileparts = (self.bpod_dir, protocol, subject)
+                camera_res = self._start_camera(bpod_id, camera, fileparts)
+                if camera_res <= 0:
+                    camera_res = camera_res - 2
+                else:
+                    camera_res = sync_res
 
         res = self.bpod_process[bpod_index].send_command(
             ("RUN", protocol, subject, settings)
         )
 
         if (res is not None) and (res[0] == "RUN"):
+
             if res[1] == 1:
                 self.publish.send_pyobj(
                     ("RUN", bpod_id, protocol, subject, settings, camera)
                 )
-            return res[1]
+                return camera_res
+
+            else:
+
+                if (camera is not None) and (camera != ""):
+                    if protocol == camera["record_protocol"]:
+                        if sync_res == 1:
+                            self.camera_sync.stop_sync_channel(
+                                int(self.cameras[bpod_id]["sync_channel"])
+                            )
+                        if camera_res > 0:
+                            self._stop_camera(bpod_id, True)
+
+                return res[1]
         else:
             return None
 
@@ -878,8 +905,6 @@ class BpodAcademyServer:
 
     def _stop_bpod_protocol(self, bpod_id, stop_camera_write_only=False):
 
-        print("STOPPING PROTOCOL")
-
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
 
         res = self.bpod_process[bpod_index].send_command(("STOP",))
@@ -887,9 +912,10 @@ class BpodAcademyServer:
         time.sleep(0.25)
 
         if self.camera_process[bpod_index] is not None:
-            sync_res = self.camera_sync.stop_sync_channel(
-                int(self.cameras[bpod_id]["sync_channel"])
-            )
+            if self.camera_sync is not None:
+                sync_res = self.camera_sync.stop_sync_channel(
+                    int(self.cameras[bpod_id]["sync_channel"])
+                )
             camera_res = self._stop_camera(bpod_id, stop_camera_write_only)
             # if stop_camera_write_only:
             #     camera_res = self.camera_process[bpod_index].stop_write()

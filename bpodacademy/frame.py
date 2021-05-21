@@ -449,20 +449,32 @@ class BpodFrame(tk.Frame):
                     )
                 elif reply == -3:
                     tk.messagebox.showwarning(
-                        "Failed to start camera!",
-                        f"Failed to start camera for {self.bpod_id}!",
+                        "Failed to start camera acquisition!",
+                        f"Failed to start camera acquisition for {self.bpod_id}!",
                         parent=self,
                     )
                 elif reply == -4:
                     tk.messagebox.showwarning(
-                        "Failed to start camera!",
+                        "Failed to start camera writer!",
                         f"Failed to start camera writer for {self.bpod_id}!",
                         parent=self,
                     )
                 elif reply == -5:
                     tk.messagebox.showwarning(
+                        "Failed to start sync channel!",
+                        f"Failed to start camera synchronization channel for {self.bpod_id}!",
+                        parent=self,
+                    )
+                elif reply == -6:
+                    tk.messagebox.showwarning(
+                        "Task is already running!",
+                        f"Cannot change camera in the middle of the task for {self.bpod_id}!",
+                        parent=self,
+                    )
+                elif reply == -7:
+                    tk.messagebox.showwarning(
                         "Failed to start camera!",
-                        f"Failed to start camera sync for {self.bpod_id}!",
+                        f"No camera device selected for {self.bpod_id}!",
                         parent=self,
                     )
 
@@ -572,6 +584,7 @@ class BpodFrame(tk.Frame):
                 "exposure": None,
                 "gain": None,
                 "sync_channel": None,
+                "record_protocol": None,
             }
         )
 
@@ -586,7 +599,8 @@ class BpodFrame(tk.Frame):
             "fps": {"value": default_camera_settings["fps"], "dtype": int},
             "exposure": {"value": default_camera_settings["exposure"], "dtype": int},
             "gain": {"value": default_camera_settings["gain"], "dtype": int},
-            "sync_channel": {"value": default_camera_settings["sync_channel"], "dtype": int, "restriction": [i for i in range(13)]}
+            "sync_channel": {"value": default_camera_settings["sync_channel"], "dtype": int, "restriction": [i for i in range(13)]},
+            "record_protocol": {"value": default_camera_settings["record_protocol"], "dtype": str, "restriction": self._get_protocols()}
         }
 
         camera_settings_window = SettingsWindow(
