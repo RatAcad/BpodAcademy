@@ -507,11 +507,12 @@ class BpodAcademyServer:
     def _copy_settings(
         self, from_protocol, from_subject, from_settings, to_protocol, to_subject
     ):
-
-        to_subject = (
-            [to_subject] if to_subject != "All" else self._load_subjects(to_protocol)
-        )
-        to_subject.remove(from_subject)
+        
+        if to_subject == "All":
+            to_subject = self._load_subjects(to_protocol)
+            to_subject.remove(from_subject)
+        else:
+            to_subject = [to_subject]
 
         copy_from = Path(
             f"{self.bpod_dir}/Data/{from_subject}/{from_protocol}/Session Settings/{from_settings}.mat"
