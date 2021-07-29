@@ -57,6 +57,9 @@ class BpodAcademyServer:
             if avail:
                 devs.append(index)
                 cap.release()
+            elif platform.system() == "Linux":
+                avail = Path(f"/dev/video{index + 1}").exists()
+
             index += 1
 
         return devs
