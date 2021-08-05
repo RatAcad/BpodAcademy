@@ -5,6 +5,8 @@ import kthread
 import cv2
 import ctypes
 import numpy as np
+import traceback
+import logging
 
 from pathlib import Path
 import datetime
@@ -99,25 +101,33 @@ class BpodProcess:
 
     def _start_bpod(self):
 
-        # start matlab engine
+        try:
 
-        self._write_to_log("starting matlab engine")
-        self.eng = matlab.engine.start_matlab()
+            # start matlab engine
 
-        # start Bpod
+            self._write_to_log("starting matlab engine")
+            self.eng = matlab.engine.start_matlab()
 
-        self._write_to_log("starting bpod")
-        self.eng.Bpod(
-            self.serial_port,
-            0,
-            0,
-            self.id,
-            nargout=0,
-            stdout=self.stdout,
-            stderr=self.stdout,
-        )
+            # start Bpod
 
-        self.q_to_main.put(True)
+            self._write_to_log("starting bpod")
+            self.eng.Bpod(
+                self.serial_port,
+                0,
+                0,
+                self.id,
+                nargout=0,
+                stdout=self.stdout,
+                stderr=self.stdout,
+            )
+
+            self.q_to_main.put(1)
+
+        except matlab.engine.MatlabExecutionError:
+
+            logging.error(f"Process: failed to start matlab engine.\n{traceback.format_exc()}")
+
+            self.q_to_main.put(-1)
 
     def _check_running_protocol(self):
 
@@ -344,8 +354,8 @@ class BpodProcess:
         try:
             success = self.q_to_main.get(timeout=timeout)
         except Empty:
-            success = False
-
+            success = 0
+        
         return success
 
     def send_command(self, cmd=None, timeout=WAIT_EXEC_COMMAND_SEC):

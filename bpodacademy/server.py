@@ -13,6 +13,7 @@ import shutil
 import traceback
 import cv2
 import time
+import logging
 
 from bpodacademy.exception import BpodAcademyError
 from bpodacademy.process import BpodProcess
@@ -432,7 +433,8 @@ class BpodAcademyServer:
             except Exception:
 
                 self.reply.send_pyobj(None)
-                traceback.print_exc()
+                logging.error(f"Server: error responding to the command {cmd}.\n{traceback.format_exc()}")
+                # traceback.print_exc()
 
     def stop(self):
 
@@ -776,10 +778,12 @@ class BpodAcademyServer:
         res = self.bpod_process[bpod_index].start()
 
         # return result
-        # 0 if not successful
+        # -1 if matlab process failed to start
+        # 0 if otherwise not successful
         # 1 if successful
         # 2 if successful but no calibration file found for rig
-        if res:
+
+        if res > 0:
             cal_file = Path(
                 f"{self.bpod_dir}/Calibration Files/LiquidCalibration_{bpod_id}.mat"
             )
@@ -792,7 +796,8 @@ class BpodAcademyServer:
             self.cfg["bpod_status"][bpod_index] = (1, None, None, None)
 
         else:
-            code = 0
+
+            code = res
 
         return code
 
@@ -815,7 +820,7 @@ class BpodAcademyServer:
 
         except Exception as e:
 
-            print(e)
+            logging.error(f"Server: error starting all bpod = {e}")
 
             return False
 

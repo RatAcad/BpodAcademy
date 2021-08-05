@@ -4,6 +4,7 @@ import os
 import zmq
 from PIL import Image, ImageTk
 import serial.tools.list_ports as list_ports
+import logging
 
 from bpodacademy.utils.tkutil import SettingsWindow
 from bpodacademy.exception import BpodAcademyError
@@ -90,6 +91,9 @@ class BpodFrame(tk.Frame):
             try:
                 reply = self.request.recv_pyobj()
             except zmq.Again:
+                logging.error(
+                    f"Frame: server time out while waiting for reply to message = {msg}"
+                )
                 reply = None
 
             return reply
@@ -205,7 +209,9 @@ class BpodFrame(tk.Frame):
             self.switch_gui_button.grid(sticky="nsew", row=1, column=2)
 
         self.start_protocol_button = tk.Button(
-            self, text="Run Protocol", command=self._start_bpod_protocol,
+            self,
+            text="Run Protocol",
+            command=self._start_bpod_protocol,
         )
         self.start_protocol_button.grid(
             sticky="nsew", row=1, column=2 + (not self.remote)
@@ -233,7 +239,9 @@ class BpodFrame(tk.Frame):
             self.calib_gui_button.grid(sticky="nsew", row=2, column=2)
 
         self.stop_protocol_button = tk.Button(
-            self, text="Stop Protocol", command=self._stop_bpod_protocol,
+            self,
+            text="Stop Protocol",
+            command=self._stop_bpod_protocol,
         )
         self.stop_protocol_button.grid(
             sticky="nsew", row=2, column=2 + (not self.remote)
@@ -300,7 +308,15 @@ class BpodFrame(tk.Frame):
                 wait_dialog.update()
 
             reply = self._remote_to_server(("BPOD", "START", self.bpod_id))
-            if reply is None:
+            if reply == -1:
+                tk.messagebox.showerror(
+                    "Failed to start Bpod!",
+                    f"Failed to start matlab process for {self.bpod_id}. "
+                    "Please check that Bpod device is plugged into computer. "
+                    "If this error persists, try restarting the computer.",
+                )
+
+            if (reply is None) or (reply == 0):
                 self._no_server_message("START")
 
             if window:
@@ -599,8 +615,16 @@ class BpodFrame(tk.Frame):
             "fps": {"value": default_camera_settings["fps"], "dtype": int},
             "exposure": {"value": default_camera_settings["exposure"], "dtype": int},
             "gain": {"value": default_camera_settings["gain"], "dtype": int},
-            "sync_channel": {"value": default_camera_settings["sync_channel"], "dtype": int, "restriction": [i for i in range(13)]},
-            "record_protocol": {"value": default_camera_settings["record_protocol"], "dtype": str, "restriction": self._get_protocols()}
+            "sync_channel": {
+                "value": default_camera_settings["sync_channel"],
+                "dtype": int,
+                "restriction": [i for i in range(13)],
+            },
+            "record_protocol": {
+                "value": default_camera_settings["record_protocol"],
+                "dtype": str,
+                "restriction": self._get_protocols(),
+            },
         }
 
         camera_settings_window = SettingsWindow(

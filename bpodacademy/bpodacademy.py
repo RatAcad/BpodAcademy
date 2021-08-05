@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import pathlib
 import platform
+
 if platform.system() == "Windows":
     pathlib.PosixPath = pathlib.WindowsPath
 else:
@@ -23,8 +24,8 @@ else:
 import shutil
 import csv
 from distutils.util import strtobool
+import logging
 
-# from typing import Protocol
 from scipy.io import savemat
 from multiprocess.pool import ThreadPool
 import zmq
@@ -36,6 +37,14 @@ try:
 except ModuleNotFoundError:
     pass
 from bpodacademy.frame import BpodFrame
+
+
+LOG_FILE = Path(os.getenv("BPOD_DIR")) / "Academy" / "logs" / "BpodAcademy.log"
+LOG_FORMAT = "%(asctime)s %(levelname)-8s %(message)s"
+LOG_DATE = "%Y-%m-%d %H:%M:%S"
+logging.basicConfig(
+    filename=LOG_FILE, format=LOG_FORMAT, level=logging.DEBUG, datefmt=LOG_DATE
+)
 
 
 class BpodAcademy(Tk):
@@ -161,7 +170,7 @@ class BpodAcademy(Tk):
         self.subscribe.connect(f"tcp://{self.ip}:{self.port+1}")
 
         # look for connection
-        reply = self._remote_to_server(("CONFIG", "ACADEMY"), timeout=1000)            
+        reply = self._remote_to_server(("CONFIG", "ACADEMY"), timeout=1000)
 
         if test:
             return reply
@@ -297,8 +306,11 @@ class BpodAcademy(Tk):
     def _add_box(self, bpod_id, bpod_serial, position):
 
         status = self._remote_to_server(("BPOD", "QUERY", bpod_id))
-        camera_settings = self.cameras[bpod_id] if (self.cameras is not None) and (bpod_id in self.cameras) else None
-
+        camera_settings = (
+            self.cameras[bpod_id]
+            if (self.cameras is not None) and (bpod_id in self.cameras)
+            else None
+        )
 
         self.bpod_frames.append(
             BpodFrame(
@@ -811,7 +823,7 @@ class BpodAcademy(Tk):
                 else:
                     try:
                         val = int(v_strip)
-                    except ValueError:
+                    except ValueError as e:
                         try:
                             val = float(v_strip)
                         except ValueError:
@@ -1067,6 +1079,9 @@ class BpodAcademy(Tk):
             try:
                 reply = self.request.recv_pyobj()
             except zmq.Again:
+                logging.error(
+                    f"BpodAcademy: server time out while waiting for reply from message = {msg}"
+                )
                 reply = None
 
             return reply
