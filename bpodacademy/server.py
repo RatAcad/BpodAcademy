@@ -83,6 +83,14 @@ class BpodAcademyServer:
         self.log_dir = Path(f"{self.bpod_dir}/Academy/logs")
         os.makedirs(self.log_dir, exist_ok=True)
 
+        # start logging to file
+        logging.basicConfig(
+            filename=self.log_dir / "BpodAcademy.log",
+            format="%(asctime)s %(levelname)-8s %(message)s",
+            level=logging.DEBUG,
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
         # initialize bpod process managers
         self.bpod_process = [None for bpod_id in self.cfg["bpod_ids"]]
         self.camera_process = [None for bpod_id in self.cfg["bpod_ids"]]
