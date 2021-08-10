@@ -8,6 +8,7 @@ from multiprocess.queues import Queue
 from queue import Empty
 from pathlib import Path
 import datetime
+import logging
 
 
 class BpodAcademyCamera(object):
@@ -213,7 +214,10 @@ class BpodAcademyCamera(object):
 
             else:
 
-                raise Exception("OpenCV VideoCapture.read did not return an image!")
+                logging.error("Camera: OpenCV VideoCapture.read did not return an image! Closing camera...")
+                self.camera_acquire = False
+
+                # raise Exception("OpenCV VideoCapture.read did not return an image!")
 
     def _write_on_thread(self, fileparts):
 
