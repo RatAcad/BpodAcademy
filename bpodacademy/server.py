@@ -445,7 +445,6 @@ class BpodAcademyServer:
 
                 self.reply.send_pyobj(None)
                 logging.error(f"Server: error responding to the command {cmd}.\n{traceback.format_exc()}")
-                # traceback.print_exc()
 
     def stop(self):
 
@@ -607,8 +606,6 @@ class BpodAcademyServer:
                 )
                 if not res:
                     return -3
-            else:
-                return -3
 
             res = self.camera_process[bpod_index].start_write(fileparts)
             if not res:
@@ -938,10 +935,6 @@ class BpodAcademyServer:
                     int(self.cameras[bpod_id]["sync_channel"])
                 )
             camera_res = self._stop_camera(bpod_id, stop_camera_write_only)
-            # if stop_camera_write_only:
-            #     camera_res = self.camera_process[bpod_index].stop_write()
-            # else:
-            #     camera_res = self.camera_process[bpod_index].stop_acquisition()
         else:
             camera_res = 0
 

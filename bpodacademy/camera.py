@@ -73,7 +73,9 @@ class BpodAcademyCamera(object):
         self.q_main_to_cam = Queue(ctx=self.ctx)
 
         self.cam_proc = self.ctx.Process(
-            target=self._run_camera_process, args=(self.frame_shared,), daemon=True,
+            target=self._run_camera_process,
+            args=(self.frame_shared,),
+            daemon=True,
         )
         self.cam_proc.start()
 
@@ -116,14 +118,6 @@ class BpodAcademyCamera(object):
             target=self._acquire_on_thread, daemon=True
         )
 
-        # if fileparts is not None:
-        #     self.camera_write_thread = threading.Thread(
-        #         target=self._write_on_thread, args=(fileparts,), daemon=True
-        #     )
-        #     self.camera_write_thread.start()
-        # else:
-        #     self.camera_write_thread = None
-
         self.camera_acquire_thread.start()
 
         # wait for commands from main thread (start/stop write thread, stop acquisition)
@@ -156,7 +150,7 @@ class BpodAcademyCamera(object):
                     self.camera_write_thread = None
                     self.q_cam_to_main.put(True)
 
-                elif (not cmd[1]):
+                elif not cmd[1]:
 
                     self.q_cam_to_main.put(True)
 
@@ -214,7 +208,9 @@ class BpodAcademyCamera(object):
 
             else:
 
-                logging.error("Camera: OpenCV VideoCapture.read did not return an image! Closing camera...")
+                logging.error(
+                    "Camera: OpenCV VideoCapture.read did not return an image! Closing camera..."
+                )
                 self.camera_acquire = False
 
                 # raise Exception("OpenCV VideoCapture.read did not return an image!")
@@ -258,19 +254,25 @@ class BpodAcademyCamera(object):
             # release video writer (save video)
             vw.release()
 
-            # get sync times
-            if self.sync_channel is not None:
-                self.q_cam_to_sync.put((self.sync_channel, frame_times[-1]))
-                sync_times = self.q_sync_to_cam.get()
-
-            # save timestamps
+            # set up timestamps file
             fn_ts = (
                 base_dir
                 / "Timestamps"
                 / f"{subject}_{protocol}_{start_camera_time_str}.npz"
             )
             fn_ts.parent.mkdir(parents=True, exist_ok=True)
-            np.savez(fn_ts, frame_times=np.array(frame_times), sync_times=np.array(sync_times))
+
+            # (fetch sync times and) save timestamps
+            if self.sync_channel is not None:
+                self.q_cam_to_sync.put((self.sync_channel, frame_times[-1]))
+                sync_times = self.q_sync_to_cam.get()
+                np.savez(
+                    fn_ts,
+                    frame_times=np.array(frame_times),
+                    sync_times=np.array(sync_times),
+                )
+            else:
+                np.savez(fn_ts, frame_times=np.array(frame_times))
 
             # update time for next recording
             start_camera_time = start_camera_time + datetime.timedelta(hours=1)
