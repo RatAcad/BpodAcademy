@@ -39,14 +39,6 @@ except ModuleNotFoundError:
 from bpodacademy.frame import BpodFrame
 
 
-LOG_FILE = Path(os.getenv("BPOD_DIR")) / "Academy" / "logs" / "BpodAcademy.log"
-LOG_FORMAT = "%(asctime)s %(levelname)-8s %(message)s"
-LOG_DATE = "%Y-%m-%d %H:%M:%S"
-logging.basicConfig(
-    filename=LOG_FILE, format=LOG_FORMAT, level=logging.DEBUG, datefmt=LOG_DATE
-)
-
-
 class BpodAcademy(Tk):
 
     ### Define constants used in GUI ###
@@ -170,7 +162,7 @@ class BpodAcademy(Tk):
         self.subscribe.connect(f"tcp://{self.ip}:{self.port+1}")
 
         # look for connection
-        reply = self._remote_to_server(("CONFIG", "ACADEMY"), timeout=1000)
+        reply = self._remote_to_server(("CONFIG", "ACADEMY"), timeout=1000, log_error=not test)
 
         if test:
             return reply
@@ -1069,7 +1061,7 @@ class BpodAcademy(Tk):
             BpodAcademy.ZMQ_SUBSCRIBE_FREQUENCY_MS, self._listen_to_server
         )
 
-    def _remote_to_server(self, msg, timeout=ZMQ_REQUEST_RCVTIMEO_MS):
+    def _remote_to_server(self, msg, timeout=ZMQ_REQUEST_RCVTIMEO_MS, log_error=True):
 
         if self.request is not None:
 
@@ -1079,9 +1071,10 @@ class BpodAcademy(Tk):
             try:
                 reply = self.request.recv_pyobj()
             except zmq.Again:
-                logging.error(
-                    f"BpodAcademy: server time out while waiting for reply from message = {msg}"
-                )
+                if log_error:
+                    logging.error(
+                        f"BpodAcademy: server time out while waiting for reply from message = {msg}"
+                    )
                 reply = None
 
             return reply

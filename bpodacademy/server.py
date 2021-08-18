@@ -83,6 +83,14 @@ class BpodAcademyServer:
         self.log_dir = Path(f"{self.bpod_dir}/Academy/logs")
         os.makedirs(self.log_dir, exist_ok=True)
 
+        # start logging to file
+        logging.basicConfig(
+            filename=self.log_dir / "BpodAcademy.log",
+            format="%(asctime)s %(levelname)-8s %(message)s",
+            level=logging.DEBUG,
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
         # initialize bpod process managers
         self.bpod_process = [None for bpod_id in self.cfg["bpod_ids"]]
         self.camera_process = [None for bpod_id in self.cfg["bpod_ids"]]
@@ -437,7 +445,6 @@ class BpodAcademyServer:
 
                 self.reply.send_pyobj(None)
                 logging.error(f"Server: error responding to the command {cmd}.\n{traceback.format_exc()}")
-                # traceback.print_exc()
 
     def stop(self):
 
@@ -599,8 +606,6 @@ class BpodAcademyServer:
                 )
                 if not res:
                     return -3
-            else:
-                return -3
 
             res = self.camera_process[bpod_index].start_write(fileparts)
             if not res:
@@ -930,10 +935,6 @@ class BpodAcademyServer:
                     int(self.cameras[bpod_id]["sync_channel"])
                 )
             camera_res = self._stop_camera(bpod_id, stop_camera_write_only)
-            # if stop_camera_write_only:
-            #     camera_res = self.camera_process[bpod_index].stop_write()
-            # else:
-            #     camera_res = self.camera_process[bpod_index].stop_acquisition()
         else:
             camera_res = 0
 
