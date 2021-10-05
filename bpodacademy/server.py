@@ -929,7 +929,7 @@ class BpodAcademyServer:
 
         time.sleep(0.25)
 
-        if self.camera_process[bpod_index] is not None:
+        if (self.camera_process[bpod_index] is not None) and (self.camera_process[bpod_index].writer_on):
             if self.camera_sync is not None:
                 sync_res = self.camera_sync.stop_sync_channel(
                     int(self.cameras[bpod_id]["sync_channel"])
