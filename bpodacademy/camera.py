@@ -103,6 +103,7 @@ class BpodAcademyCamera(object):
 
         try:
             res = self.q_cam_to_main.get(timeout=BpodAcademyCamera.WAIT_WRITER_SEC)
+            self.fps = res[1] if res[0] else self.fps
             self.writer_on = True
 
             # tell acquire process to start saving frames
@@ -123,7 +124,10 @@ class BpodAcademyCamera(object):
         camera_acquire = True
         camera_write = False
 
-        self.q_cam_to_main.put(ret)
+        if ret:
+            self.q_cam_to_main.put((ret, int(self.cap.get(cv2.CAP_PROP_FPS))))
+        else:
+            self.q_cam_to_main.put((ret))
 
         # camera acquire loop
 
@@ -207,10 +211,10 @@ class BpodAcademyCamera(object):
             fn_vid.parent.mkdir(parents=True, exist_ok=True)
 
             # create video writer and timestamp list
-            fps = self.fps
             vw = cv2.VideoWriter(
-                str(fn_vid), cv2.VideoWriter_fourcc(*"DIVX"), fps, self.resolution
+                str(fn_vid), cv2.VideoWriter_fourcc(*"DIVX"), self.fps, self.resolution
             )
+            frame_time = datetime.timestamp(start_camera_time)
             frame_times = []
 
             if first_video:
@@ -218,7 +222,7 @@ class BpodAcademyCamera(object):
                 first_video = False
 
             while (camera_write) and (
-                (datetime.datetime.now() - start_camera_time)
+                (datetime.fromtimestamp(frame_time) - start_camera_time)
                 < datetime.timedelta(hours=1)
             ):
 
