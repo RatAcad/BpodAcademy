@@ -52,10 +52,10 @@ class BpodAcademyCameraSync(object):
                 msg = self.q_to_cmd.get_nowait()
 
                 if msg[0] == "DEVICE_ON":
-                    self.q_to_main.put(True)
+                    self.q_to_main.put("DEVICE_ON")
 
                 elif msg[0] == "DEVICE_OFF":
-                    self.q_to_main.put(False)
+                    self.q_to_main.put("DEVICE_OFF")
 
                 elif msg[0] == "CHANNEL_ON":
                     channel = msg[1]
@@ -100,12 +100,13 @@ class BpodAcademyCameraSync(object):
 
         # start read thread
         self.reading = True
-        self.read_thread = threading.Thread(target=self._read_on_thread, daemon=True)
-        self.read_thread.start()
 
         while self.reading:
 
+            ### write block
+
             try:
+
                 msg = self.q_to_read.get_nowait()
 
                 if msg[0] == "DEVICE_ON":
@@ -128,17 +129,12 @@ class BpodAcademyCameraSync(object):
                     self.reading = False
 
             except Empty:
+
                 pass
 
-        self.read_thread.join()
-
-    def _read_on_thread(self):
-
-        while self.reading:
+            ### read block
 
             current_time = time.time()
-
-            # wait for command
             cmd = self._read(require=False)
 
             if cmd == b"A":
@@ -161,7 +157,6 @@ class BpodAcademyCameraSync(object):
                 self.q_to_cmd.put((code, channel, state, sync_time, current_time))
 
             elif cmd == b"Z":
-
                 self.q_to_cmd.put(("DEVICE_OFF", current_time))
 
     def _read(self, nbytes=1, require=True):
@@ -201,9 +196,11 @@ class BpodAcademyCameraSync(object):
         self.q_to_read.put(("DEVICE_ON",))
 
         try:
-            reply = self.q_to_main.get(
-                timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
-            )
+            reply = None
+            while reply != "DEVICE_ON":
+                reply = self.q_to_main.get(
+                    timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
+                )
         except Empty:
             raise BpodAcademyError("Error activating camera sync device!")
 
@@ -214,9 +211,11 @@ class BpodAcademyCameraSync(object):
         self.q_to_read.put(("DEVICE_OFF",))
 
         try:
-            reply = self.q_to_main.get(
-                timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
-            )
+            reply = None
+            while reply != "DEVICE_OFF":
+                reply = self.q_to_main.get(
+                    timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
+                )
         except Empty:
             raise BpodAcademyError("Failed to deactivate camera sync device!")
 

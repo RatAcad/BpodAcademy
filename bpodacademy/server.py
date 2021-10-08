@@ -662,12 +662,9 @@ class BpodAcademyServer:
     def _disconnect_camera_sync(self):
 
         if self.camera_sync is not None:
-            if self.camera_sync.sync_active:
-                res = self.camera_sync.stop_sync_device()
-                if res:
-                    self.camera_sync = None
-            else:
-                res = True
+            res = self.camera_sync.stop_sync_device()
+            if res:
+                self.camera_sync = None
         else:
             res = True
 

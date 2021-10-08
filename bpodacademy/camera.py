@@ -315,17 +315,12 @@ class BpodAcademyCamera(object):
         if self.acquisition_on:
 
             if self.writer_on:
-                print("stop camera write")
                 self.stop_write()
-
-            print("stop camera acquire")
 
             self.q_main_to_acquire.put(("ACQUIRE", False))
 
             # wait for camera process to finish
             self.cam_acquire.join()
-
-            print("camera done")
 
             # close camera process
             self.cam_proc = None
