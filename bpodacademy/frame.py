@@ -5,6 +5,7 @@ import zmq
 from PIL import Image, ImageTk
 import serial.tools.list_ports as list_ports
 import logging
+import traceback
 
 from bpodacademy.utils.tkutil import SettingsWindow
 from bpodacademy.exception import BpodAcademyError
@@ -92,7 +93,7 @@ class BpodFrame(tk.Frame):
                 reply = self.request.recv_pyobj()
             except zmq.Again:
                 logging.error(
-                    f"Frame: server time out while waiting for reply to message = {msg}"
+                    f"Frame: server time out while waiting for reply to message = {msg}.\n{traceback.format_exc()}"
                 )
                 reply = None
 
@@ -445,54 +446,31 @@ class BpodFrame(tk.Frame):
 
                 if reply is None:
                     self._no_server_message("RUN")
-                elif reply == 0:
+                elif reply[0] == 0:
                     tk.messagebox.showwarning(
                         "Protocol did not start!",
                         f"Protocol failed to start on {self.bpod_id}! Please check the log for error messages.",
                         parent=self,
                     )
-                elif reply == -1:
-                    tk.messagebox.showwarning(
-                        "Protocol did not start!",
-                        f"Protocol failed to start on {self.bpod_id}! Please check if a protocol is currently running.",
-                        parent=self,
-                    )
-                elif reply == -2:
+                elif reply[1] == -1:
                     tk.messagebox.showwarning(
                         "Failed to start camera!",
                         f"Failed to start camera for {self.bpod_id}!",
                         parent=self,
                     )
-                elif reply == -3:
-                    tk.messagebox.showwarning(
-                        "Failed to start camera acquisition!",
-                        f"Failed to start camera acquisition for {self.bpod_id}!",
-                        parent=self,
-                    )
-                elif reply == -4:
-                    tk.messagebox.showwarning(
-                        "Failed to start camera writer!",
-                        f"Failed to start camera writer for {self.bpod_id}!",
-                        parent=self,
-                    )
-                elif reply == -5:
+                elif reply[1] == -2:
                     tk.messagebox.showwarning(
                         "Failed to start sync channel!",
                         f"Failed to start camera synchronization channel for {self.bpod_id}!",
                         parent=self,
                     )
-                elif reply == -6:
+                elif reply[1] == -3:
                     tk.messagebox.showwarning(
-                        "Task is already running!",
-                        f"Cannot change camera in the middle of the task for {self.bpod_id}!",
+                        "Failed to start camera writer!",
+                        f"Failed to start camera writer for {self.bpod_id}!",
                         parent=self,
                     )
-                elif reply == -7:
-                    tk.messagebox.showwarning(
-                        "Failed to start camera!",
-                        f"No camera device selected for {self.bpod_id}!",
-                        parent=self,
-                    )
+
 
     def start_bpod_protocol(self, protocol, subject, settings, camera):
 
@@ -663,16 +641,11 @@ class BpodFrame(tk.Frame):
                 self._open_camera_window()
                 self.show_camera_button["text"] = "Hide Video"
                 self.camera_entry["state"] = "disabled"
-            elif res == -2:
+            elif res == 0:
                 tk.messagebox.showwarning(
                     "No Camera Selected!",
                     "Please select a camera to show video!",
                     parent=self,
-                )
-            elif res == -3:
-                tk.messagebox.showwarning(
-                    "Camera already initialized!",
-                    "Cannot change cameras during a protocol. Please stop the running protocol before editing the camera.",
                 )
             elif res <= 0:
                 BpodAcademyError(

@@ -9,6 +9,7 @@ from queue import Empty
 from pathlib import Path
 import datetime
 import logging
+import traceback
 
 
 class BpodAcademyCamera(object):
@@ -25,6 +26,7 @@ class BpodAcademyCamera(object):
         fps=None,
         exposure=None,
         gain=None,
+        sync_device=None,
         sync_channel=None,
     ):
 
@@ -38,6 +40,7 @@ class BpodAcademyCamera(object):
         self.exposure = exposure
         self.gain = gain
 
+        self.sync_device = sync_device
         self.sync_channel = sync_channel
 
         self.resolution_display = (
@@ -60,8 +63,6 @@ class BpodAcademyCamera(object):
         )
 
         self.ctx = mp.get_context("spawn")
-        self.q_cam_to_sync = Queue(ctx=self.ctx)
-        self.q_sync_to_cam = Queue(ctx=self.ctx)
 
         self.acquisition_on = False
         self.writer_on = False
@@ -81,9 +82,10 @@ class BpodAcademyCamera(object):
         self.cam_acquire.start()
 
         try:
-            code = int(
-                self.q_cam_to_main.get(timeout=BpodAcademyCamera.WAIT_CAMERA_SEC)
+            code, self.fps = self.q_cam_to_main.get(
+                timeout=BpodAcademyCamera.WAIT_CAMERA_SEC
             )
+            code = int(code)
         except Empty:
             code = -1
 
@@ -92,7 +94,7 @@ class BpodAcademyCamera(object):
     def start_write(self, fileparts):
 
         # open writer process
-        
+
         self.q_main_to_writer = Queue(ctx=self.ctx)
 
         self.cam_write = self.ctx.Process(
@@ -103,7 +105,6 @@ class BpodAcademyCamera(object):
 
         try:
             res = self.q_cam_to_main.get(timeout=BpodAcademyCamera.WAIT_WRITER_SEC)
-            self.fps = res[1] if res[0] else self.fps
             self.writer_on = True
 
             # tell acquire process to start saving frames
@@ -146,7 +147,7 @@ class BpodAcademyCamera(object):
             else:
 
                 logging.error(
-                    "Camera: OpenCV VideoCapture.read did not return an image! Closing camera..."
+                    f"Camera: OpenCV VideoCapture.read did not return an image! Closing camera...\n{traceback.format_exc()}"
                 )
                 camera_acquire = False
 
@@ -214,7 +215,7 @@ class BpodAcademyCamera(object):
             vw = cv2.VideoWriter(
                 str(fn_vid), cv2.VideoWriter_fourcc(*"DIVX"), self.fps, self.resolution
             )
-            frame_time = datetime.timestamp(start_camera_time)
+            frame_time = datetime.datetime.timestamp(start_camera_time)
             frame_times = []
 
             if first_video:
@@ -222,7 +223,7 @@ class BpodAcademyCamera(object):
                 first_video = False
 
             while (camera_write) and (
-                (datetime.fromtimestamp(frame_time) - start_camera_time)
+                (datetime.datetime.fromtimestamp(frame_time) - start_camera_time)
                 < datetime.timedelta(hours=1)
             ):
 
@@ -256,9 +257,10 @@ class BpodAcademyCamera(object):
             fn_ts.parent.mkdir(parents=True, exist_ok=True)
 
             # (fetch sync times and) save timestamps
-            if self.sync_channel is not None:
-                self.q_cam_to_sync.put((self.sync_channel, frame_times[-1]))
-                sync_times = self.q_sync_to_cam.get()
+            if (self.sync_device is not None) and (self.sync_channel is not None):
+                sync_times = self.sync_device.get_sync_times(
+                    self.sync_channel, frame_times[-1]
+                )
                 np.savez(
                     fn_ts,
                     frame_times=np.array(frame_times),
@@ -313,12 +315,17 @@ class BpodAcademyCamera(object):
         if self.acquisition_on:
 
             if self.writer_on:
+                print("stop camera write")
                 self.stop_write()
+
+            print("stop camera acquire")
 
             self.q_main_to_acquire.put(("ACQUIRE", False))
 
             # wait for camera process to finish
             self.cam_acquire.join()
+
+            print("camera done")
 
             # close camera process
             self.cam_proc = None

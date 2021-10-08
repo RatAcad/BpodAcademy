@@ -27,7 +27,7 @@ class BpodProcess:
 
     WAIT_START_PROCESS_SEC = 30
     WAIT_EXEC_COMMAND_SEC = 10
-    WAIT_START_PROTOCOL_SEC = 1
+    WAIT_START_PROTOCOL_SEC = 0.25
     WAIT_KILL_PROTOCOL_SEC = 10
     WAIT_KILL_PROCESS_SEC = 10
     SAVE_LOG_SEC = 1
@@ -199,11 +199,11 @@ class BpodProcess:
             if self.protocol_thread.is_alive():
                 return 1
             else:
-                return 0
+                return -1
 
         else:
 
-            return -1
+            return 0
 
     def _run_protocol_on_thread(self, protocol, subject, settings):
 

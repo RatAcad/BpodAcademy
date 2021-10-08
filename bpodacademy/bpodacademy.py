@@ -25,6 +25,7 @@ import shutil
 import csv
 from distutils.util import strtobool
 import logging
+import traceback
 
 from scipy.io import savemat
 from multiprocess.pool import ThreadPool
@@ -931,8 +932,9 @@ class BpodAcademy(Tk):
     def _update_camera_settings(self, bpod_id, camera_settings):
 
         self.cameras[bpod_id] = camera_settings
-        bpod_index = self.cfg["bpod_ids"].index(bpod_id)
-        self.bpod_frames[bpod_index].camera_settings = camera_settings
+        if bpod_id in self.cfg["bpod_ids"]:
+            bpod_index = self.cfg["bpod_ids"].index(bpod_id)
+            self.bpod_frames[bpod_index].camera_settings = camera_settings
 
     def _delete_logs_command(self):
 
@@ -1073,7 +1075,7 @@ class BpodAcademy(Tk):
             except zmq.Again:
                 if log_error:
                     logging.error(
-                        f"BpodAcademy: server time out while waiting for reply from message = {msg}"
+                        f"BpodAcademy: server time out while waiting for reply from message = {msg}.\n{traceback.format_exc()}"
                     )
                 reply = None
 
