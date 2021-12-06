@@ -26,18 +26,17 @@ class BpodAcademyCameraSync(object):
         self.q_to_cmd = Queue(ctx=self.ctx)
         self.q_to_read = Queue(ctx=self.ctx)
 
-        self.processing_messages = True
         self.command_process = self.ctx.Process(
             target=self._process_sync_messages, daemon=True
         )
-        self.command_process.start()
 
         self.read_process = self.ctx.Process(
             target=self._run_sync_process,
             args=(serial_port, baud_rate, read_timeout),
             daemon=True,
         )
-        self.read_process.start()
+
+        self.sync_active = False
 
     def _process_sync_messages(self):
 
@@ -49,6 +48,7 @@ class BpodAcademyCameraSync(object):
         while processing_messages:
 
             try:
+
                 msg = self.q_to_cmd.get_nowait()
 
                 if msg[0] == "DEVICE_ON":
@@ -56,6 +56,10 @@ class BpodAcademyCameraSync(object):
 
                 elif msg[0] == "DEVICE_OFF":
                     self.q_to_main.put("DEVICE_OFF")
+
+                elif msg[0] == "DEVICE_CLOSED":
+                    self.q_to_main.put("DEVICE_CLOSED")
+                    processing_messages = False
 
                 elif msg[0] == "CHANNEL_ON":
                     channel = msg[1]
@@ -86,9 +90,6 @@ class BpodAcademyCameraSync(object):
                     sync_times = self._fetch_channel_sync_times(channel, max_time, delete)
                     self.q_to_main.put(sync_times)
 
-                elif msg[0] == "STOP":
-                    processing_messages = False
-
             except Empty:
 
                 pass
@@ -115,6 +116,10 @@ class BpodAcademyCameraSync(object):
                 elif msg[0] == "DEVICE_OFF":
                     self.ser.write(b"Z")
 
+                elif msg[0] == "DEVICE_CLOSED":
+                    self.reading = False
+                    self.q_to_cmd.put(("DEVICE_CLOSED",))
+
                 elif msg[0] == "CHANNEL_ON":
                     channel = msg[1]
                     serial_cmd = b"S" + struct.pack("h", channel)
@@ -124,9 +129,6 @@ class BpodAcademyCameraSync(object):
                     channel = msg[1]
                     serial_cmd = b"E" + struct.pack("h", channel)
                     res = self.ser.write(serial_cmd)
-
-                elif msg[0] == "DEVICE_CLOSED":
-                    self.reading = False
 
             except Empty:
 
@@ -158,6 +160,8 @@ class BpodAcademyCameraSync(object):
 
             elif cmd == b"Z":
                 self.q_to_cmd.put(("DEVICE_OFF", current_time))
+        
+        self.ser.close()
 
     def _read(self, nbytes=1, require=True):
 
@@ -193,6 +197,9 @@ class BpodAcademyCameraSync(object):
 
     def start_sync_device(self):
 
+        self.command_process.start()
+        self.read_process.start()
+
         self.q_to_read.put(("DEVICE_ON",))
 
         try:
@@ -203,6 +210,8 @@ class BpodAcademyCameraSync(object):
                 )
         except Empty:
             raise BpodAcademyError("Error activating camera sync device!")
+
+        self.sync_active = True
 
         return True
 
@@ -216,8 +225,23 @@ class BpodAcademyCameraSync(object):
                 reply = self.q_to_main.get(
                     timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
                 )
+
+            self.q_to_read.put(("DEVICE_CLOSED",))
+
+            reply=None
+            while reply != "DEVICE_CLOSED":
+                reply = self.q_to_main.get(
+                    timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
+                )
+
+            self.read_process.join()
+            self.command_process.join()
+
         except Empty:
+
             raise BpodAcademyError("Failed to deactivate camera sync device!")
+
+        self.sync_active = False
 
         return True
 
@@ -244,16 +268,3 @@ class BpodAcademyCameraSync(object):
             raise BpodAcademyError(f"Failed to stop sync channel = {channel}!")
 
         return True
-
-    def close_sync_device(self):
-
-        self.q_to_read.put(("DEVICE_CLOSED",))
-
-        self.read_process.join(timeout=BpodAcademyCameraSync.CLOSE_DEVICE_TIMEOUT_SEC)
-        if self.read_process.is_alive():
-            raise BpodAcademyError("Failed to close camera sync read process!")
-
-        self.q_main_to_cmd.put("STOP")
-        self.command_process.join(timeout=BpodAcademyCameraSync.CLOSE_DEVICE_TIMEOUT_SEC)
-        if self.command_process.is_alive():
-            raise BpodAcademyError("Failed to close camera sync command thread!")
