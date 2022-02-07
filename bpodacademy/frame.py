@@ -6,9 +6,9 @@ from PIL import Image, ImageTk
 import serial.tools.list_ports as list_ports
 import logging
 import traceback
-
-from bpodacademy.utils.tkutil import SettingsWindow
+from bpodacademy.camera import BpodAcademyCamera
 from bpodacademy.exception import BpodAcademyError
+from bpodacademy.utils.tkutil import SettingsWindow
 
 
 class BpodFrame(tk.Frame):
@@ -56,9 +56,10 @@ class BpodFrame(tk.Frame):
         if (request_socket is None) or (subscribe_socket is None):
 
             if (ip is None) or (port is None):
-                raise BpodAcademyError(
-                    "No server communication! Must specify either request and subscribe socket OR ip and port to create sockets."
+                logging.error(
+                    f"Frame: No server communication! Must specify either request and subscribe socket OR ip and port to create sockets.\n{traceback.format_exc()}"
                 )
+                raise BpodAcademyError("No server communication! Must specify either request and subscribe socket OR ip and port to create sockets.")
             else:
                 context = zmq.Context()
                 self.request = context.socket(zmq.REQ)
@@ -471,7 +472,6 @@ class BpodFrame(tk.Frame):
                         parent=self,
                     )
 
-
     def start_bpod_protocol(self, protocol, subject, settings, camera):
 
         self.check_protocol = self.after(
@@ -623,8 +623,8 @@ class BpodFrame(tk.Frame):
             if self.status < 2:
                 res = self._remote_to_server(("CAMERAS", "STOP", self.bpod_id))
                 if res < 0:
-                    BpodAcademyError(
-                        f"Error stopping camera for Bpod: {self.bpod_id}, Camera ID: {self.camera_settings['device']}"
+                    logging.error(
+                        f"Frame: Error stopping camera for Bpod: {self.bpod_id}, Camera ID: {self.camera_settings['device']}...\n{traceback.format_exc()}"
                     )
                 else:
                     self.camera_entry["state"] = "normal"
@@ -648,8 +648,8 @@ class BpodFrame(tk.Frame):
                     parent=self,
                 )
             elif res <= 0:
-                BpodAcademyError(
-                    f"Error starting camera for Bpod: {self.bpod_id}, Camera ID: {self.camera_settings['device']}"
+                logging.error(
+                    f"Frame: Error starting camera for Bpod: {self.bpod_id}, Camera ID: {self.camera_settings['device']}...\n{traceback.format_exc()}"
                 )
 
     def _open_camera_window(self):

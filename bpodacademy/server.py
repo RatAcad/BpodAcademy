@@ -14,8 +14,8 @@ import traceback
 import cv2
 import time
 import logging
-
 from bpodacademy.exception import BpodAcademyError
+
 from bpodacademy.process import BpodProcess
 from bpodacademy.camera import BpodAcademyCamera
 from bpodacademy.sync import BpodAcademyCameraSync
@@ -71,8 +71,11 @@ class BpodAcademyServer:
         if self.bpod_dir:
             self.bpod_dir = Path(self.bpod_dir)
         else:
+            logging.error(
+                f"Server: Bpod directory not specified! Please provide your local directory by setting the bpod_dir argument or by setting the environmental variable BPOD_DIR...\n{traceback.format_exc()}"
+            )
             raise BpodAcademyError(
-                "Bpod directory not specified! Please provide your local directory by setting the bpod_dir argument or by setting the environmental variable BPOD_DIR"
+                "Server: Bpod directory not specified! Please provide your local directory by setting the bpod_dir argument or by setting the environmental variable BPOD_DIR."
             )
 
         self.cfg_file = Path(f"{self.bpod_dir}/Academy/AcademyConfig.csv")
@@ -439,7 +442,9 @@ class BpodAcademyServer:
 
                     else:
 
-                        raise BpodAcademyError(f"Command = {cmd} is not implemented!")
+                        logging.error(
+                            f"Server: \Command = {cmd} is not implemented!... n{traceback.format_exc()}"
+                        )
 
             except Exception:
 
@@ -828,8 +833,9 @@ class BpodAcademyServer:
 
         except Exception as e:
 
-            logging.error(f"Server: error starting all bpod = {e}.\n{traceback.format_exc()}")
-
+            logging.error(
+                f"Server: error starting all bpod = {e}.\n{traceback.format_exc()}"
+            )
 
             return False
 

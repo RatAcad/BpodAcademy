@@ -31,13 +31,12 @@ from scipy.io import savemat
 from multiprocess.pool import ThreadPool
 import zmq
 
-from bpodacademy.exception import BpodAcademyError
-
 try:
     from bpodacademy.server import BpodAcademyServer
 except ModuleNotFoundError:
     pass
 from bpodacademy.frame import BpodFrame
+from bpodacademy.exception import BpodAcademyError
 
 
 class BpodAcademy(Tk):
@@ -859,7 +858,9 @@ class BpodAcademy(Tk):
 
             teensy_ports = self._remote_to_server(("PORTS",))
             if teensy_ports is None:
-                BpodAcademyError("Error fetching Ports from server!")
+                logging.error(f"BpodAcademy: Error fetching Ports from server!\n{traceback.format_exc()}")
+                raise BpodAcademyError(f"BpodAcademy: Error fetching Ports from server!")
+
             teensy_serials = [p[0] for p in teensy_ports]
 
             camera_sync_window = Toplevel(self)

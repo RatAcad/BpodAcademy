@@ -6,8 +6,8 @@ import threading
 import numpy as np
 import struct
 import time
-
-from bpodacademy.exception import BpodAcademyError
+import logging
+import traceback
 
 
 class BpodAcademyCameraSync(object):
@@ -167,7 +167,7 @@ class BpodAcademyCameraSync(object):
 
         data = self.ser.read(nbytes)
         if (require) and (len(data) < nbytes):
-            raise BpodAcademyError("Error reading from camera sync device!")
+            logging.error(f"Error reading from camera sync device!\n{traceback.format_exc()}")
         return data
 
     def _fetch_channel_sync_times(self, channel, max_time=np.inf, delete=True):
@@ -191,7 +191,8 @@ class BpodAcademyCameraSync(object):
         try:
             sync_times = self.q_to_main.get(timeout=BpodAcademyCameraSync.WAIT_FETCH_SYNC_TIMES)
         except Empty:
-            raise BpodAcademyError(f"Failed to fetch sync times for channel = {channel}!")
+            logging.error(f"Failed to fetch sync times for channel = {channel}!\n{traceback.format_exc()}")
+            sync_times = []
 
         return sync_times
 
@@ -209,7 +210,7 @@ class BpodAcademyCameraSync(object):
                     timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
                 )
         except Empty:
-            raise BpodAcademyError("Error activating camera sync device!")
+            logging.error(f"Error activating camera sync device!\n{traceback.format_exc()}")
 
         self.sync_active = True
 
@@ -239,7 +240,9 @@ class BpodAcademyCameraSync(object):
 
         except Empty:
 
-            raise BpodAcademyError("Failed to deactivate camera sync device!")
+            logging.error(f"Failed to deactivate camera sync device!\n{traceback.format_exc()}")
+
+            return False
 
         self.sync_active = False
 
@@ -265,6 +268,7 @@ class BpodAcademyCameraSync(object):
             res = self.q_to_main.get(timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC)
             res = 1 if res == "CHANNEL_OFF" else 0
         except Empty:
-            raise BpodAcademyError(f"Failed to stop sync channel = {channel}!")
+            logging.error(f"Failed to stop sync channel = {channel}!\n{traceback.format_exc()}")
+            return False
 
         return True
