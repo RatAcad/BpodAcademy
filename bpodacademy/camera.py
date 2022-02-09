@@ -129,7 +129,7 @@ class BpodAcademyCamera(object):
         if ret:
             self.q_cam_to_main.put((ret, int(self.cap.get(cv2.CAP_PROP_FPS))))
         else:
-            self.q_cam_to_main.put((ret))
+            self.q_cam_to_main.put((ret, -1))
 
         # camera acquire loop
 
