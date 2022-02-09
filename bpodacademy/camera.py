@@ -148,9 +148,17 @@ class BpodAcademyCamera(object):
             else:
 
                 logging.error(
-                    f"Camera: OpenCV VideoCapture.read did not return an image! Closing camera...\n{traceback.format_exc()}"
+                    f"Camera: OpenCV VideoCapture.read did not return an image! Trying to reconnect...\n{traceback.format_exc()}"
                 )
-                camera_acquire = False
+
+                self.cap.release()
+                cret = self._initialize_camera()
+
+                if cret:
+                    logging.info("Camera reconnected!")
+                else:
+                    logging.info("Camera failed to reconnect, stopping acquisition...")
+                    camera_acquire = False
 
             # wait for commands from main thread (start/stop write thread, stop acquisition)
 
@@ -208,24 +216,24 @@ class BpodAcademyCamera(object):
             # get file name
             start_camera_time_str = start_camera_time.strftime("%Y%m%d_%H%M%S")
             fn_vid = (
-                base_dir / "Video" / f"{subject}_{protocol}_{start_camera_time_str}.mp4"
+                base_dir / "Video" / f"{subject}_{protocol}_{start_camera_time_str}.avi"
             )
             fn_vid.parent.mkdir(parents=True, exist_ok=True)
 
             # create video writer and timestamp list
-            # vw = cv2.VideoWriter(
-            #     str(fn_vid), cv2.VideoWriter_fourcc(*"DIVX"), self.fps, self.resolution
-            # )
-            vw = skvideo.io.FFmpegWriter(
-                fn_vid.as_posix(),
-                inputdict={"-r": f"{int(self.fps)}"},
-                outputdict={
-                    "-vcodec": "libx264",
-                    "-crf": f"{15}",
-                    "-preset": "veryslow",
-                    "-r": f"{int(self.fps)}",
-                },
+            vw = cv2.VideoWriter(
+                fn_vid.as_posix(), cv2.VideoWriter_fourcc(*"DIVX"), self.fps, self.resolution
             )
+            # vw = skvideo.io.FFmpegWriter(
+            #     fn_vid.as_posix(),
+            #     inputdict={"-r": f"{int(self.fps)}"},
+            #     outputdict={
+            #         "-vcodec": "libx264",
+            #         "-crf": f"{15}",
+            #         "-preset": "veryslow",
+            #         "-r": f"{int(self.fps)}",
+            #     },
+            # )
             frame_time = datetime.datetime.timestamp(start_camera_time)
             frame_times = []
 
@@ -240,7 +248,8 @@ class BpodAcademyCamera(object):
 
                 try:
                     frame, frame_time = self.frame_queue.get_nowait()
-                    vw.writeFrame(frame)
+                    vw.write(frame)
+                    # vw.writeFrame(frame)
                     frame_times.append(frame_time)
 
                 except Empty:
@@ -257,7 +266,8 @@ class BpodAcademyCamera(object):
                         camera_write = cmd[1]
 
             # release video writer (save video)
-            vw.close()
+            vw.release()
+            # vw.close()
 
             # set up timestamps file
             fn_ts = (
