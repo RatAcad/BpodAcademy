@@ -21,14 +21,8 @@ if platform.system() == "Windows":
     pathlib.PosixPath = pathlib.WindowsPath
 else:
     pathlib.WindowsPath = pathlib.PosixPath
-import shutil
-import csv
 from distutils.util import strtobool
-import logging
-import traceback
 
-from scipy.io import savemat
-from multiprocess.pool import ThreadPool
 import zmq
 
 try:
@@ -162,13 +156,14 @@ class BpodAcademy(Tk):
         self.subscribe.connect(f"tcp://{self.ip}:{self.port+1}")
 
         # look for connection
-        reply = self._remote_to_server(("CONFIG", "ACADEMY"), timeout=1000, log_error=not test)
+        reply = self._remote_to_server(
+            ("CONFIG", "ACADEMY"), timeout=1000,
+        )
 
         if test:
             return reply
         else:
             if not reply:
-                # self._disconnect_remote()
                 messagebox.showerror(
                     "Remote Not Connected",
                     f"Remote failed to connect to server! Please ensure the IP address and port are correct and that the server is online.",
@@ -858,8 +853,9 @@ class BpodAcademy(Tk):
 
             teensy_ports = self._remote_to_server(("PORTS",))
             if teensy_ports is None:
-                logging.error(f"BpodAcademy: Error fetching Ports from server!\n{traceback.format_exc()}")
-                raise BpodAcademyError(f"BpodAcademy: Error fetching Ports from server!")
+                raise BpodAcademyError(
+                    f"BpodAcademy: Error fetching Ports from server!"
+                )
 
             teensy_serials = [p[0] for p in teensy_ports]
 
@@ -1064,7 +1060,7 @@ class BpodAcademy(Tk):
             BpodAcademy.ZMQ_SUBSCRIBE_FREQUENCY_MS, self._listen_to_server
         )
 
-    def _remote_to_server(self, msg, timeout=ZMQ_REQUEST_RCVTIMEO_MS, log_error=True):
+    def _remote_to_server(self, msg, timeout=ZMQ_REQUEST_RCVTIMEO_MS):
 
         if self.request is not None:
 
@@ -1074,10 +1070,6 @@ class BpodAcademy(Tk):
             try:
                 reply = self.request.recv_pyobj()
             except zmq.Again:
-                if log_error:
-                    logging.error(
-                        f"BpodAcademy: server time out while waiting for reply from message = {msg}.\n{traceback.format_exc()}"
-                    )
                 reply = None
 
             return reply

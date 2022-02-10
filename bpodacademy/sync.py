@@ -2,11 +2,9 @@ import serial
 import multiprocess as mp
 from multiprocess.queues import Queue
 from queue import Empty
-import threading
 import numpy as np
 import struct
 import time
-import logging
 import traceback
 
 
@@ -17,11 +15,19 @@ class BpodAcademyCameraSync(object):
     WAIT_FETCH_SYNC_TIMES = 10
     CLOSE_DEVICE_TIMEOUT_SEC = 10
 
-    def __init__(self, serial_port, baud_rate=9600, read_timeout=0):
+    def __init__(
+        self,
+        serial_port,
+        baud_rate=9600,
+        read_timeout=0,
+        ctx=None,
+        log_queue=None,
+    ):
 
         self.channel_events = {}
 
-        self.ctx = mp.get_context("spawn")
+        self.ctx = mp.get_context("spawn") if ctx is not None else ctx
+        self.log_queue = log_queue
         self.q_to_main = Queue(ctx=self.ctx)
         self.q_to_cmd = Queue(ctx=self.ctx)
         self.q_to_read = Queue(ctx=self.ctx)
@@ -87,7 +93,9 @@ class BpodAcademyCameraSync(object):
                     channel = msg[1]
                     max_time = msg[2]
                     delete = msg[3]
-                    sync_times = self._fetch_channel_sync_times(channel, max_time, delete)
+                    sync_times = self._fetch_channel_sync_times(
+                        channel, max_time, delete
+                    )
                     self.q_to_main.put(sync_times)
 
             except Empty:
@@ -160,14 +168,20 @@ class BpodAcademyCameraSync(object):
 
             elif cmd == b"Z":
                 self.q_to_cmd.put(("DEVICE_OFF", current_time))
-        
+
         self.ser.close()
 
     def _read(self, nbytes=1, require=True):
 
         data = self.ser.read(nbytes)
         if (require) and (len(data) < nbytes):
-            logging.error(f"Error reading from camera sync device!\n{traceback.format_exc()}")
+            if self.log_queue is not None:
+                self.log_queue.put(
+                    (
+                        "error",
+                        f"Error reading from camera sync device!\n{traceback.format_exc()}",
+                    )
+                )
         return data
 
     def _fetch_channel_sync_times(self, channel, max_time=np.inf, delete=True):
@@ -181,7 +195,7 @@ class BpodAcademyCameraSync(object):
                 self.channel_events[channel][:, 3] < max_time,
                 axis=0,
             )
-            
+
         return sub_data
 
     def get_sync_times(self, channel, max_time=np.inf, delete=True):
@@ -189,9 +203,18 @@ class BpodAcademyCameraSync(object):
         self.q_to_cmd.put(("SYNC", channel, max_time, delete))
 
         try:
-            sync_times = self.q_to_main.get(timeout=BpodAcademyCameraSync.WAIT_FETCH_SYNC_TIMES)
+            sync_times = self.q_to_main.get(
+                timeout=BpodAcademyCameraSync.WAIT_FETCH_SYNC_TIMES
+            )
         except Empty:
-            logging.error(f"Failed to fetch sync times for channel = {channel}!\n{traceback.format_exc()}")
+
+            if self.log_queue is not None:
+                self.log_queue.put(
+                    (
+                        "error",
+                        f"Failed to fetch sync times for channel = {channel}!\n{traceback.format_exc()}",
+                    )
+                )
             sync_times = []
 
         return sync_times
@@ -210,7 +233,14 @@ class BpodAcademyCameraSync(object):
                     timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
                 )
         except Empty:
-            logging.error(f"Error activating camera sync device!\n{traceback.format_exc()}")
+
+            if self.log_queue is not None:
+                self.log_queue.put(
+                    (
+                        "error",
+                        f"Error activating camera sync device!\n{traceback.format_exc()}",
+                    )
+                )
 
         self.sync_active = True
 
@@ -229,7 +259,7 @@ class BpodAcademyCameraSync(object):
 
             self.q_to_read.put(("DEVICE_CLOSED",))
 
-            reply=None
+            reply = None
             while reply != "DEVICE_CLOSED":
                 reply = self.q_to_main.get(
                     timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
@@ -240,7 +270,13 @@ class BpodAcademyCameraSync(object):
 
         except Empty:
 
-            logging.error(f"Failed to deactivate camera sync device!\n{traceback.format_exc()}")
+            if self.log_queue is not None:
+                self.log_queue.put(
+                    (
+                        "error",
+                        f"Failed to deactivate camera sync device!\n{traceback.format_exc()}",
+                    )
+                )
 
             return False
 
@@ -253,7 +289,9 @@ class BpodAcademyCameraSync(object):
         self.q_to_read.put(("CHANNEL_ON", channel))
 
         try:
-            res = self.q_to_main.get(timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC)
+            res = self.q_to_main.get(
+                timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
+            )
             res = 1 if res == "CHANNEL_ON" else 0
         except Empty:
             res = 0
@@ -265,10 +303,22 @@ class BpodAcademyCameraSync(object):
         self.q_to_read.put(("CHANNEL_OFF", channel))
 
         try:
-            res = self.q_to_main.get(timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC)
+
+            res = self.q_to_main.get(
+                timeout=BpodAcademyCameraSync.WAIT_CONNECT_TO_SYNC_DEVICE_SEC
+            )
             res = 1 if res == "CHANNEL_OFF" else 0
+
         except Empty:
-            logging.error(f"Failed to stop sync channel = {channel}!\n{traceback.format_exc()}")
+
+            if self.log_queue is not None:
+                self.log_queue.put(
+                    (
+                        "error",
+                        f"Failed to stop sync channel = {channel}!\n{traceback.format_exc()}",
+                    )
+                )
+
             return False
 
         return True

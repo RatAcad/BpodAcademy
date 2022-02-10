@@ -21,7 +21,7 @@ setuptools.setup(
         "pyzmq",
         "pillow",
         "opencv-python",
-        "scikit-video"
+        "scikit-video",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",

@@ -13,12 +13,12 @@ import shutil
 import traceback
 import cv2
 import time
-import logging
 from bpodacademy.exception import BpodAcademyError
 
 from bpodacademy.process import BpodProcess
 from bpodacademy.camera import BpodAcademyCamera
 from bpodacademy.sync import BpodAcademyCameraSync
+from bpodacademy.logger import BpodAcademyLogger
 
 
 class BpodAcademyServer:
@@ -71,28 +71,27 @@ class BpodAcademyServer:
         if self.bpod_dir:
             self.bpod_dir = Path(self.bpod_dir)
         else:
-            logging.error(
-                f"Server: Bpod directory not specified! Please provide your local directory by setting the bpod_dir argument or by setting the environmental variable BPOD_DIR...\n{traceback.format_exc()}"
-            )
             raise BpodAcademyError(
-                "Server: Bpod directory not specified! Please provide your local directory by setting the bpod_dir argument or by setting the environmental variable BPOD_DIR."
+                (
+                    "Server: Bpod directory not specified! "
+                    "Please provide your local directory by setting the bpod_dir "
+                    "argument or by setting the environmental variable BPOD_DIR."
+                )
             )
 
+        # set up multiprocessing context
+        self.ctx = mp.get_context("spawn")
+
+        # initialize logger
+        self.log_dir = self.bpod_dir / "Academy" / "logs"
+        self.log_queue = Queue(ctx=self.ctx)
+        self.logger = BpodAcademyLogger(self.log_dir, self.log_queue)
+        self.logger.start_logging()
+
+        # read configuration files
         self.cfg_file = Path(f"{self.bpod_dir}/Academy/AcademyConfig.csv")
         self.cfg_file_camera = Path(f"{self.bpod_dir}/Academy/CameraConfig.csv")
         self._read_config()
-
-        # create log dir if it doesn't exist
-        self.log_dir = Path(f"{self.bpod_dir}/Academy/logs")
-        os.makedirs(self.log_dir, exist_ok=True)
-
-        # start logging to file
-        logging.basicConfig(
-            filename=self.log_dir / "BpodAcademy.log",
-            format="%(asctime)s %(levelname)-8s %(message)s",
-            level=logging.DEBUG,
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
 
         # initialize bpod process managers
         self.bpod_process = [None for bpod_id in self.cfg["bpod_ids"]]
@@ -101,6 +100,7 @@ class BpodAcademyServer:
         self.camera_devices = BpodAcademyServer._get_cameras()
         self.camera_sync = None
 
+        # set up zmq sockets
         context = zmq.Context()
         self.reply = context.socket(zmq.REP)
         self.reply.setsockopt(zmq.RCVTIMEO, BpodAcademyServer.ZMQ_REPLY_WAIT_MS)
@@ -442,15 +442,21 @@ class BpodAcademyServer:
 
                     else:
 
-                        logging.error(
-                            f"Server: \Command = {cmd} is not implemented!... n{traceback.format_exc()}"
+                        self.log_queue.put(
+                            (
+                                "error",
+                                f"Server: \Command = {cmd} is not implemented!... n{traceback.format_exc()}",
+                            )
                         )
 
             except Exception:
 
                 self.reply.send_pyobj(None)
-                logging.error(
-                    f"Server: error responding to the command {cmd}.\n{traceback.format_exc()}"
+                self.log_queue.put(
+                    (
+                        "error",
+                        f"Server: error responding to the command {cmd}.\n{traceback.format_exc()}",
+                    )
                 )
 
     def stop(self):
@@ -602,6 +608,8 @@ class BpodAcademyServer:
                 camera_settings["gain"],
                 self.camera_sync,
                 camera_settings["sync_channel"],
+                self.ctx,
+                self.log_queue,
             )
 
             res = self.camera_process[bpod_index].start_acquisition()
@@ -657,7 +665,11 @@ class BpodAcademyServer:
         if self.camera_sync is None:
             all_ports = BpodAcademyServer._get_bpod_ports()
             sync_serial_port = [p[1] for p in all_ports if int(p[0]) == sync_serial][0]
-            self.camera_sync = BpodAcademyCameraSync(sync_serial_port)
+            self.camera_sync = BpodAcademyCameraSync(
+                sync_serial_port,
+                ctx=self.ctx,
+                log_queue=self.log_queue,
+            )
             res = self.camera_sync.start_sync_device()
         else:
             res = self.camera_sync.sync_active
@@ -786,7 +798,11 @@ class BpodAcademyServer:
             bpod_port = bpod_ports[serial_index][1]
 
         self.bpod_process[bpod_index] = BpodProcess(
-            bpod_id, bpod_port, log_dir=self.log_dir
+            bpod_id,
+            bpod_port,
+            ctx=self.ctx,
+            log_dir=self.log_dir,
+            log_queue=self.log_queue,
         )
         res = self.bpod_process[bpod_index].start()
 
@@ -833,8 +849,11 @@ class BpodAcademyServer:
 
         except Exception as e:
 
-            logging.error(
-                f"Server: error starting all bpod = {e}.\n{traceback.format_exc()}"
+            self.log_queue.put(
+                (
+                    "error",
+                    f"Server: error starting all bpod = {e}.\n{traceback.format_exc()}",
+                )
             )
 
             return False
@@ -933,7 +952,6 @@ class BpodAcademyServer:
     def _stop_bpod_protocol(self, bpod_id, stop_camera_write_only=False):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
-
         res = self.bpod_process[bpod_index].send_command(("STOP",))
 
         time.sleep(0.25)
