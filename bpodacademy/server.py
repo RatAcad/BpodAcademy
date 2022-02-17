@@ -897,6 +897,10 @@ class BpodAcademyServer:
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
         settings = settings if settings is not None else "DefaultSettings"
 
+        # change the date the settings file was last modified to now
+        settings_file = self.bpod_dir / "Data" / subject / protocol / "Session Settings" / f"{settings}.mat"
+        settings_file.touch(exist_ok=True)
+
         camera_res = 0
         if (camera is not None) and (camera != ""):
             if protocol == camera["record_protocol"]:
