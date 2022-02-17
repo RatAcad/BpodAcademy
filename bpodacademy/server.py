@@ -941,7 +941,7 @@ class BpodAcademyServer:
             res = self.bpod_process[bpod_index].send_command(("QUERY",))
             if (res is not None) and (res[0] == "QUERY"):
                 if res[1]:
-                    return (2, res[2], res[3], res[4])
+                    return (2,) + res[2:]
                 else:
                     return (1,)
             else:
