@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import ttk
 import zmq
 from PIL import Image, ImageTk
-import traceback
 from bpodacademy.exception import BpodAcademyError
 from bpodacademy.utils.tkutil import SettingsWindow
 
@@ -569,6 +568,7 @@ class BpodFrame(tk.Frame):
                 "fps": 30,
                 "exposure": None,
                 "gain": None,
+                "compression": 0,
                 "sync_channel": None,
                 "record_protocol": None,
             }
@@ -585,6 +585,10 @@ class BpodFrame(tk.Frame):
             "fps": {"value": default_camera_settings["fps"], "dtype": int},
             "exposure": {"value": default_camera_settings["exposure"], "dtype": int},
             "gain": {"value": default_camera_settings["gain"], "dtype": int},
+            "compression": {
+                "value": default_camera_settings["compression"],
+                "dtype": int,
+            },
             "sync_channel": {
                 "value": default_camera_settings["sync_channel"],
                 "dtype": int,
@@ -615,7 +619,7 @@ class BpodFrame(tk.Frame):
             if self.status < 2:
                 res = self._remote_to_server(("CAMERAS", "STOP", self.bpod_id))
                 res = -1 if res is None else res
-                
+
                 if res < 0:
                     tk.messagebox.showerror(
                         "Error stopping camera!",

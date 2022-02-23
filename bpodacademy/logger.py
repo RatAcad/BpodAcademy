@@ -9,6 +9,7 @@ class BpodAcademyLogger(object):
 
     WAIT_START_LOG = 3
     WAIT_STOP_LOG = 3
+    WAIT_MSG = 100
 
     def __init__(self, log_dir, log_queue):
 
@@ -47,14 +48,14 @@ class BpodAcademyLogger(object):
 
     def _log_on_thread(self):
 
-        logging.info("Logger started :)")
+        logging.info("BpodAcademy Server Started!")
 
         self.is_logging = True
 
         while self.is_logging:
 
             try:
-                log_entry = self.log_queue.get_nowait()
+                log_entry = self.log_queue.get(timeout=BpodAcademyLogger.WAIT_MSG/1000)
             except Empty:
                 log_entry = None
 
@@ -64,7 +65,6 @@ class BpodAcademyLogger(object):
 
                 if level == "error":
 
-                    print(f"ERROR :: {msg}")
                     logging.error(msg)
 
                 elif level == "warning":

@@ -4,7 +4,6 @@ from tkinter import (
     Menu,
     messagebox,
     filedialog,
-    simpledialog,
     Label,
     Entry,
     Button,
@@ -157,7 +156,8 @@ class BpodAcademy(Tk):
 
         # look for connection
         reply = self._remote_to_server(
-            ("CONFIG", "ACADEMY"), timeout=1000,
+            ("CONFIG", "ACADEMY"),
+            timeout=1000,
         )
 
         if test:
@@ -221,6 +221,7 @@ class BpodAcademy(Tk):
         menubar = Menu(self)
 
         bpod_menu = Menu(menubar, tearoff=0)
+        bpod_menu.add_command(label="Refresh Ports", command=self._refresh_bpod_ports)
         bpod_menu.add_command(label="Add Bpod", command=self._add_box_window)
         bpod_menu.add_command(label="Remove Bpod", command=self._remove_box_window)
         bpod_menu.add_command(label="Start All Bpods", command=self._start_all_bpods)
@@ -265,10 +266,16 @@ class BpodAcademy(Tk):
 
         training_menu = Menu(menubar, tearoff=0)
         training_menu.add_command(
-            label="Save Training Configuration", command=self._save_training_config
+            label="Save Training Configuration",
+            command=self._save_training_config_window,
         )
         training_menu.add_command(
-            label="Load Training Configuration", command=self._load_training_config
+            label="Load Training Configuration",
+            command=lambda: self._select_training_config(mode="load"),
+        )
+        training_menu.add_command(
+            label="Delete Training Configuration",
+            command=lambda: self._select_training_config(mode="delete"),
         )
         menubar.add_cascade(label="Training", menu=training_menu)
 
@@ -289,6 +296,10 @@ class BpodAcademy(Tk):
             )
 
         self.protocol("WM_DELETE_WINDOW", self._close_bpod_academy)
+
+    def _refresh_bpod_ports(self):
+
+        status = self._remote_to_server(("PORTS", "REFRESH"))
 
     def _add_box(self, bpod_id, bpod_serial, position):
 
@@ -1161,15 +1172,37 @@ class BpodAcademy(Tk):
 
                 return 0
 
-    def _save_training_config(self):
+    def _save_training_config_window(self):
 
-        config_file_name = simpledialog.askstring(
-            "Training Config File",
-            "Please enter a name for the new training config file:",
-            parent=self,
-        )
+        save_config_window = Toplevel(self)
+        save_config_window.title("Training Config File")
+        Label(
+            save_config_window,
+            text="Please enter a name for the new training config file:",
+        ).grid(sticky="w", row=0, column=0, rowspan=2)
+        config_file_name = StringVar(save_config_window)
 
-        if config_file_name is not None:
+        existing_configs = self._remote_to_server(("CONFIG", "TRAINING", "FETCH"))
+        Combobox(
+            save_config_window, textvariable=config_file_name, values=existing_configs
+        ).grid(sticky="nsew", row=0, column=1)
+        Button(
+            save_config_window,
+            text="Ok",
+            command=lambda: self._save_training_config(
+                config_file_name.get(), save_config_window
+            ),
+        ).grid(sticky="nsew", row=2, column=1)
+        Button(
+            save_config_window, text="Cancel", command=save_config_window.destroy
+        ).grid(sticky="nsew", row=3, column=1)
+
+    def _save_training_config(self, config_file_name, window=None):
+
+        if window is not None:
+            window.destroy()
+
+        if config_file_name:
 
             bpod_ids = []
             protocols = []
@@ -1194,7 +1227,7 @@ class BpodAcademy(Tk):
                 )
             )
 
-    def _load_training_config(self):
+    def _select_training_config(self, mode="load"):
 
         training_configs = self._remote_to_server(("CONFIG", "TRAINING", "FETCH"))
 
@@ -1212,12 +1245,20 @@ class BpodAcademy(Tk):
                 values=training_configs,
                 state="readonly",
             ).grid(sticky="nsew", row=0, column=1)
+
+            if mode == "load":
+                cmd = lambda: self._set_training_config(
+                    selected_file.get(), choose_training_config_window
+                )
+            elif mode == "delete":
+                cmd = lambda: self._delete_training_config(
+                    selected_file.get(), choose_training_config_window
+                )
+
             Button(
                 choose_training_config_window,
                 text="Submit",
-                command=lambda: self._set_training_config(
-                    selected_file.get(), choose_training_config_window
-                ),
+                command=cmd,
             ).grid(sticky="nsew", row=1, column=1)
             Button(
                 choose_training_config_window,
@@ -1225,9 +1266,18 @@ class BpodAcademy(Tk):
                 command=choose_training_config_window.destroy,
             ).grid(sticky="nsew", row=2, column=1)
 
-    def _set_training_config(self, training_config_file, window):
+        else:
 
-        window.destroy()
+            messagebox.showwarning(
+                "No training configurations!",
+                "Could not find any saved training configurations.",
+                parent=self,
+            )
+
+    def _set_training_config(self, training_config_file, window=None):
+
+        if window is not None:
+            window.destroy()
 
         if training_config_file:
             training_config = self._remote_to_server(
@@ -1246,6 +1296,26 @@ class BpodAcademy(Tk):
             else:
 
                 messagebox.showerror("Server did not return training config.")
+
+    def _delete_training_config(self, training_config_file, window=None):
+
+        if window is not None:
+            window.destroy()
+
+        if training_config_file:
+
+            status = self._remote_to_server(
+                ("CONFIG", "TRAINING", "DELETE", training_config_file)
+            )
+
+            if status[:3] == ("CONFIG", "TRAINING", "DELETE"):
+
+                if not status[3]:
+
+                    messagebox.showerror(
+                        "Failed to delete file!",
+                        f"Failed to delete the training configuration file = {training_config_file}",
+                    )
 
 
 def main():

@@ -11,8 +11,11 @@ import csv
 from scipy.io import savemat
 import shutil
 import traceback
-import cv2
 import time
+
+os.environ["OPENCV_LOG_LEVEL"] = "OFF"
+import cv2
+
 from bpodacademy.exception import BpodAcademyError
 
 from bpodacademy.process import BpodProcess
@@ -150,8 +153,9 @@ class BpodAcademyServer:
                             "fps": int(i[4]) if i[4] else None,
                             "exposure": int(i[5]) if i[5] else None,
                             "gain": int(i[6]) if i[6] else None,
-                            "sync_channel": int(i[7]) if i[7] else None,
-                            "record_protocol": i[8] if (len(i) > 8 and i[8]) else None,
+                            "compression" : int(i[7]) if i[7] else None,
+                            "sync_channel": int(i[8]) if i[8] else None,
+                            "record_protocol": i[9] if (len(i) > 9 and i[9]) else None,
                         }
                     }
                     self.cameras.update(this_camera)
@@ -178,6 +182,7 @@ class BpodAcademyServer:
                         cam["fps"],
                         cam["exposure"],
                         cam["gain"],
+                        cam["compression"],
                         cam["sync_channel"],
                         cam["record_protocol"],
                     ]
@@ -244,13 +249,29 @@ class BpodAcademyServer:
                                         ("CONFIG", "TRAINING") + training_config
                                     )
 
+                            elif cmd[2] == "DELETE":
+
+                                if len(cmd) > 3:
+                                    res = self._delete_training_config(cmd[3])
+                                else:
+                                    res = False
+
+                                self.reply.send_pyobj(("CONFIG", "TRAINING", "DELETE", res))
+
                             else:
 
                                 self.reply.send_pyobj(False)
 
                     elif cmd[0] == "PORTS":
 
-                        self.reply.send_pyobj(BpodAcademyServer._get_bpod_ports())
+                        if len(cmd) == 1:
+
+                            self.reply.send_pyobj(self.bpod_ports)
+                        
+                        elif cmd[1] == "REFRESH":
+
+                            self.bpod_ports = BpodAcademyServer._get_bpod_ports()
+                            self.reply.send_pyobj(True)
 
                     elif cmd[0] == "PROTOCOLS":
 
@@ -316,7 +337,9 @@ class BpodAcademyServer:
                             self.reply.send_pyobj(self.camera_devices)
 
                         elif cmd[1] == "REFRESH":
-                            self.camera_devices = BpodAcademyServer._get_cameras()
+                            active_cams = [c.device for c in self.camera_process if c is not None]
+                            self.camera_devices = active_cams + BpodAcademyServer._get_cameras()
+                            self.camera_devices.sort()
                             self.reply.send_pyobj(True)
 
                         elif cmd[1] == "EDIT":
@@ -606,6 +629,7 @@ class BpodAcademyServer:
                 camera_settings["fps"],
                 camera_settings["exposure"],
                 camera_settings["gain"],
+                camera_settings["compression"],
                 self.camera_sync,
                 camera_settings["sync_channel"],
                 self.ctx,
@@ -663,8 +687,7 @@ class BpodAcademyServer:
                 self._disconnect_camera_sync()
 
         if self.camera_sync is None:
-            all_ports = BpodAcademyServer._get_bpod_ports()
-            sync_serial_port = [p[1] for p in all_ports if int(p[0]) == sync_serial][0]
+            sync_serial_port = [p[1] for p in self.bpod_ports if int(p[0]) == sync_serial][0]
             self.camera_sync = BpodAcademyCameraSync(
                 sync_serial_port,
                 ctx=self.ctx,
@@ -784,18 +807,30 @@ class BpodAcademyServer:
 
         return (bpod_ids, protocols, subjects, settings)
 
+    def _delete_training_config(self, training_config_file):
+
+        file_path = (
+            self.bpod_dir / "Academy" / "training" / f"{training_config_file}.csv"
+        )
+
+        if file_path.is_file():
+            file_path.unlink()
+            return True
+        else:
+            return False
+
+
     def _start_bpod(self, bpod_id):
 
         bpod_index = self.cfg["bpod_ids"].index(bpod_id)
         bpod_serial = self.cfg["bpod_serials"][bpod_index]
-        bpod_ports = BpodAcademyServer._get_bpod_ports()
 
         if bpod_serial == "EMU":
             bpod_port = "EMU"
         else:
-            serial_index = [s[0] == bpod_serial for s in bpod_ports]
+            serial_index = [s[0] == bpod_serial for s in self.bpod_ports]
             serial_index = serial_index.index(True)
-            bpod_port = bpod_ports[serial_index][1]
+            bpod_port = self.bpod_ports[serial_index][1]
 
         self.bpod_process[bpod_index] = BpodProcess(
             bpod_id,

@@ -25,6 +25,7 @@ class BpodAcademyCamera(object):
         fps=None,
         exposure=None,
         gain=None,
+        compression=0,
         sync_device=None,
         sync_channel=None,
         ctx=None,
@@ -40,6 +41,7 @@ class BpodAcademyCamera(object):
         self.fps = fps
         self.exposure = exposure
         self.gain = gain
+        self.compression = compression
 
         self.sync_device = sync_device
         self.sync_channel = sync_channel
@@ -240,6 +242,7 @@ class BpodAcademyCamera(object):
                 outputdict={
                     "-vcodec": "libx264",
                     "-r": f"{int(self.fps)}",
+                    "-crf": f"{self.compression}",
                 },
             )
             frame_time = datetime.datetime.timestamp(start_camera_time)
