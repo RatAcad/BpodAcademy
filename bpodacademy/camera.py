@@ -1,14 +1,14 @@
 import ctypes
 import numpy as np
 import cv2
+import skvideo.io
 import time
-import threading
 import multiprocess as mp
 from multiprocess.queues import Queue
 from queue import Empty
 from pathlib import Path
 import datetime
-import logging
+import traceback
 
 
 class BpodAcademyCamera(object):
@@ -25,7 +25,11 @@ class BpodAcademyCamera(object):
         fps=None,
         exposure=None,
         gain=None,
+        compression=0,
+        sync_device=None,
         sync_channel=None,
+        ctx=None,
+        log_queue=None,
     ):
 
         try:
@@ -37,7 +41,9 @@ class BpodAcademyCamera(object):
         self.fps = fps
         self.exposure = exposure
         self.gain = gain
+        self.compression = compression
 
+        self.sync_device = sync_device
         self.sync_channel = sync_channel
 
         self.resolution_display = (
@@ -59,30 +65,33 @@ class BpodAcademyCamera(object):
             self.resolution_display[1], self.resolution_display[0], 3
         )
 
-        self.ctx = mp.get_context("spawn")
-        self.q_cam_to_sync = Queue(ctx=self.ctx)
-        self.q_sync_to_cam = Queue(ctx=self.ctx)
+        self.ctx = mp.get_context("spawn") if ctx is not None else ctx
+        self.log_queue = log_queue
 
         self.acquisition_on = False
+        self.writer_on = False
 
     def start_acquisition(self):
 
         self.acquisition_on = True
 
         self.q_cam_to_main = Queue(ctx=self.ctx)
-        self.q_main_to_cam = Queue(ctx=self.ctx)
+        self.q_main_to_acquire = Queue(ctx=self.ctx)
+        self.frame_queue = Queue(ctx=self.ctx)
 
-        self.cam_proc = self.ctx.Process(
-            target=self._run_camera_process,
+        self.cam_acquire = self.ctx.Process(
+            target=self._acquire_on_process,
             args=(self.frame_shared,),
             daemon=True,
         )
-        self.cam_proc.start()
+
+        self.cam_acquire.start()
 
         try:
-            code = int(
-                self.q_cam_to_main.get(timeout=BpodAcademyCamera.WAIT_CAMERA_SEC)
+            code, self.fps = self.q_cam_to_main.get(
+                timeout=BpodAcademyCamera.WAIT_CAMERA_SEC
             )
+            code = int(code)
         except Empty:
             code = -1
 
@@ -90,81 +99,87 @@ class BpodAcademyCamera(object):
 
     def start_write(self, fileparts):
 
-        self.q_main_to_cam.put(("WRITE", True, fileparts))
+        # open writer process
+
+        self.q_main_to_writer = Queue(ctx=self.ctx)
+
+        self.cam_write = self.ctx.Process(
+            target=self._write_on_process,
+            args=(fileparts,),
+            daemon=True,
+        )
+
+        self.cam_write.start()
 
         try:
             res = self.q_cam_to_main.get(timeout=BpodAcademyCamera.WAIT_WRITER_SEC)
+            self.writer_on = True
+
+            # tell acquire process to start saving frames
+            self.q_main_to_acquire.put(("WRITE", True))
+
         except Empty:
             res = False
 
         return res
 
-    def _run_camera_process(self, frame_shared):
+    def _acquire_on_process(self, frame_shared):
 
         self.frame = np.frombuffer(frame_shared.get_obj(), dtype="uint8").reshape(
             self.resolution_display[1], self.resolution_display[0], 3
         )
 
         ret = self._initialize_camera()
-        self.q_cam_to_main.put(ret)
+        camera_acquire = True
+        camera_write = False
 
-        # setup camera acquisition and write threads
-        self.frame_queue = Queue(ctx=self.ctx)
-        self.camera_acquire = True
-        self.camera_write = False
+        if ret:
+            self.q_cam_to_main.put((ret, int(self.cap.get(cv2.CAP_PROP_FPS))))
+        else:
+            self.q_cam_to_main.put((ret, -1))
 
-        # start camera acquisition thread and write thread (if fileparts provided)
-        self.camera_acquire_thread = threading.Thread(
-            target=self._acquire_on_thread, daemon=True
-        )
+        # camera acquire loop
 
-        self.camera_acquire_thread.start()
+        while camera_acquire:
 
-        # wait for commands from main thread (start/stop write thread, stop acquisition)
-        while self.camera_acquire:
+            ret, frame = self.cap.read()
+            frame_time = time.time()
 
-            cmd = self.q_main_to_cam.get()
+            if ret:
 
-            if cmd[0] == "WRITE":
+                np.copyto(self.frame, cv2.resize(frame, self.resolution_display))
 
-                if (cmd[1]) and (not self.camera_write):
+                if camera_write:
+                    self.frame_queue.put((frame, frame_time))
 
-                    self.camera_write = True
-                    fileparts = cmd[2]
-                    self.camera_write_thread = threading.Thread(
-                        target=self._write_on_thread,
-                        args=(fileparts,),
-                        daemon=True,
+            else:
+
+                if self.log_queue is not None:
+                    self.log_queue.put(
+                        (
+                            "error",
+                            f"Camera: OpenCV VideoCapture.read did not return an image! stopping acquisition...\n{traceback.format_exc()}",
+                        )
                     )
-                    self.camera_write_thread.start()
 
-                    while not self.camera_write:
-                        pass
+                print(f"Camera {self.device} crashed, please reconnect!")
 
-                    self.q_cam_to_main.put(True)
+                camera_acquire = False
 
-                elif (not cmd[1]) and (self.camera_write):
+            # wait for commands from main thread (start/stop write thread, stop acquisition)
 
-                    self.camera_write = False
-                    self.camera_write_thread.join()
-                    self.camera_write_thread = None
-                    self.q_cam_to_main.put(True)
+            try:
+                cmd = self.q_main_to_acquire.get_nowait()
+            except Empty:
+                cmd = None
 
-                elif not cmd[1]:
+            if cmd is not None:
 
-                    self.q_cam_to_main.put(True)
+                if cmd[0] == "WRITE":
+                    camera_write = cmd[1]
 
-            elif cmd[0] == "ACQUIRE":
-
-                self.camera_acquire = cmd[1]
-
-        # wait for threads to finish
-        self.camera_acquire_thread.join()
-
-        if self.camera_write:
-            self.camera_write = False
-            self.camera_write_thread.join()
-            self.camera_write_thread = None
+                elif cmd[0] == "ACQUIRE":
+                    camera_acquire = cmd[1]
 
         # close connection to camera
         self.cap.release()
@@ -192,67 +207,78 @@ class BpodAcademyCamera(object):
 
         return ret
 
-    def _acquire_on_thread(self):
-
-        while self.camera_acquire:
-
-            ret, frame = self.cap.read()
-            frame_time = time.time()
-
-            if ret:
-
-                np.copyto(self.frame, cv2.resize(frame, self.resolution_display))
-
-                if self.camera_write:
-                    self.frame_queue.put((frame, frame_time))
-
-            else:
-
-                logging.error(
-                    "Camera: OpenCV VideoCapture.read did not return an image! Closing camera..."
-                )
-                self.camera_acquire = False
-
-                # raise Exception("OpenCV VideoCapture.read did not return an image!")
-
-    def _write_on_thread(self, fileparts):
+    def _write_on_process(self, fileparts):
 
         bpod_dir, protocol, subject = fileparts
         base_dir = Path(f"{bpod_dir}/Data/{subject}/{protocol}/Video Data")
 
         start_camera_time = datetime.datetime.now()
 
-        while self.camera_write:
+        camera_write = True
+        first_video = True
+
+        while camera_write:
 
             # get file name
             start_camera_time_str = start_camera_time.strftime("%Y%m%d_%H%M%S")
+            # fn_vid = (
+            #     base_dir / "Video" / f"{subject}_{protocol}_{start_camera_time_str}.avi"
+            # )
             fn_vid = (
-                base_dir / "Video" / f"{subject}_{protocol}_{start_camera_time_str}.avi"
+                base_dir / "Video" / f"{subject}_{protocol}_{start_camera_time_str}.mp4"
             )
             fn_vid.parent.mkdir(parents=True, exist_ok=True)
 
             # create video writer and timestamp list
-            fps = int(self.cap.get(cv2.CAP_PROP_FPS))
-            vw = cv2.VideoWriter(
-                str(fn_vid), cv2.VideoWriter_fourcc(*"DIVX"), fps, self.resolution
+            # vw = cv2.VideoWriter(
+            #     fn_vid.as_posix(),
+            #     cv2.VideoWriter_fourcc(*"DIVX"),
+            #     self.fps,
+            #     self.resolution,
+            # )
+            vw = skvideo.io.FFmpegWriter(
+                fn_vid.as_posix(),
+                inputdict={"-r": f"{int(self.fps)}"},
+                outputdict={
+                    "-vcodec": "libx264",
+                    "-r": f"{int(self.fps)}",
+                    "-crf": f"{self.compression}",
+                },
             )
+            frame_time = datetime.datetime.timestamp(start_camera_time)
             frame_times = []
 
-            while (self.camera_write) and (
-                (datetime.datetime.now() - start_camera_time)
+            if first_video:
+                self.q_cam_to_main.put(True)
+                first_video = False
+
+            while (camera_write) and (
+                (datetime.datetime.fromtimestamp(frame_time) - start_camera_time)
                 < datetime.timedelta(hours=1)
             ):
 
                 try:
                     frame, frame_time = self.frame_queue.get_nowait()
-                    vw.write(frame)
+                    # vw.write(frame)
+                    vw.writeFrame(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                     frame_times.append(frame_time)
 
                 except Empty:
                     pass
 
+                # check for commands
+                try:
+                    cmd = self.q_main_to_writer.get_nowait()
+                except Empty:
+                    cmd = None
+
+                if cmd is not None:
+                    if cmd[0] == "WRITE":
+                        camera_write = cmd[1]
+
             # release video writer (save video)
-            vw.release()
+            # vw.release()
+            vw.close()
 
             # set up timestamps file
             fn_ts = (
@@ -263,9 +289,10 @@ class BpodAcademyCamera(object):
             fn_ts.parent.mkdir(parents=True, exist_ok=True)
 
             # (fetch sync times and) save timestamps
-            if self.sync_channel is not None:
-                self.q_cam_to_sync.put((self.sync_channel, frame_times[-1]))
-                sync_times = self.q_sync_to_cam.get()
+            if (self.sync_device is not None) and (self.sync_channel is not None):
+                sync_times = self.sync_device.get_sync_times(
+                    self.sync_channel, frame_times[-1]
+                )
                 np.savez(
                     fn_ts,
                     frame_times=np.array(frame_times),
@@ -298,12 +325,16 @@ class BpodAcademyCamera(object):
 
         if self.acquisition_on:
 
-            self.q_main_to_cam.put(("WRITE", False))
+            self.q_main_to_acquire.put(("WRITE", False))
+            self.q_main_to_writer.put(("WRITE", False))
 
+            # wait for writer to finish
             try:
-                res = self.q_cam_to_main.get(timeout=BpodAcademyCamera.WAIT_WRITER_SEC)
-            except Empty:
-                res = -1
+                self.cam_write.join()
+                res = 1
+                self.writer_on = False
+            except Exception:
+                res = 0
 
         else:
 
@@ -315,10 +346,13 @@ class BpodAcademyCamera(object):
 
         if self.acquisition_on:
 
-            self.q_main_to_cam.put(("ACQUIRE", False))
+            if self.writer_on:
+                self.stop_write()
+
+            self.q_main_to_acquire.put(("ACQUIRE", False))
 
             # wait for camera process to finish
-            self.cam_proc.join()
+            self.cam_acquire.join()
 
             # close camera process
             self.cam_proc = None

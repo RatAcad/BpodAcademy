@@ -2,11 +2,8 @@ import multiprocess as mp
 from multiprocess.queues import Queue
 from queue import Empty
 import kthread
-import cv2
-import ctypes
 import numpy as np
 import traceback
-import logging
 
 from pathlib import Path
 import datetime
@@ -19,15 +16,15 @@ import io
 class BpodProcess:
     """BpodProcess Class
 
-        Controls individual instances of matlab.engine in background processes,
-        using the multiprocess package.
+    Controls individual instances of matlab.engine in background processes,
+    using the multiprocess package.
     """
 
     # Define Constants
 
     WAIT_START_PROCESS_SEC = 30
     WAIT_EXEC_COMMAND_SEC = 10
-    WAIT_START_PROTOCOL_SEC = 1
+    WAIT_START_PROTOCOL_SEC = 0.25
     WAIT_KILL_PROTOCOL_SEC = 10
     WAIT_KILL_PROCESS_SEC = 10
     SAVE_LOG_SEC = 1
@@ -42,25 +39,29 @@ class BpodProcess:
 
     # Object Methods
 
-    def __init__(self, id, serial_port, log_dir=None):
+    def __init__(self, id, serial_port, ctx=None, log_dir=None, log_queue=None):
         """Constructor method
 
         Parameters
         ----------
         id : str
             Arbitrary name for Bpod
-        serial_number : str
+        serial_port : str
             The serial number for the FTDI chip on the Bpod device
+        ctx : multiprocessing context
         log_dir : str or Path-like object
             Path to the directory to save log files
+        log_queue : multiprocessing Queue
+            queue to pass messages to log to BpodAcademy log file
         """
 
         self.id = id
         self.serial_port = serial_port
-        self.ctx = mp.get_context("spawn")
+        self.ctx = mp.get_context("spawn") if ctx is None else ctx
         self.log_dir = (
             Path(log_dir) if log_dir is not None else Path("~/logs").expanduser()
         )
+        self.log_queue = log_queue
         self.protocol_details = None
 
     def _write_to_log(self, note=""):
@@ -125,7 +126,13 @@ class BpodProcess:
 
         except matlab.engine.MatlabExecutionError:
 
-            logging.error(f"Process: failed to start matlab engine.\n{traceback.format_exc()}")
+            if self.log_queue is not None:
+                self.log_queue.put(
+                    (
+                        "error",
+                        f"Process: failed to start matlab engine.\n{traceback.format_exc()}",
+                    )
+                )
 
             self.q_to_main.put(-1)
 
@@ -166,7 +173,10 @@ class BpodProcess:
             self._write_to_log("calibrate")
 
             self.eng.BpodLiquidCalibration(
-                "Calibrate", nargout=0, stdout=self.stdout, stderr=self.stdout,
+                "Calibrate",
+                nargout=0,
+                stdout=self.stdout,
+                stderr=self.stdout,
             )
 
             return 1
@@ -199,11 +209,11 @@ class BpodProcess:
             if self.protocol_thread.is_alive():
                 return 1
             else:
-                return 0
+                return -1
 
         else:
 
-            return -1
+            return 0
 
     def _run_protocol_on_thread(self, protocol, subject, settings):
 
@@ -355,7 +365,7 @@ class BpodProcess:
             success = self.q_to_main.get(timeout=timeout)
         except Empty:
             success = 0
-        
+
         return success
 
     def send_command(self, cmd=None, timeout=WAIT_EXEC_COMMAND_SEC):

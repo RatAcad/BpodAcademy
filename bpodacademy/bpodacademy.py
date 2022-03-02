@@ -4,7 +4,6 @@ from tkinter import (
     Menu,
     messagebox,
     filedialog,
-    simpledialog,
     Label,
     Entry,
     Button,
@@ -21,22 +20,16 @@ if platform.system() == "Windows":
     pathlib.PosixPath = pathlib.WindowsPath
 else:
     pathlib.WindowsPath = pathlib.PosixPath
-import shutil
-import csv
 from distutils.util import strtobool
-import logging
 
-from scipy.io import savemat
-from multiprocess.pool import ThreadPool
 import zmq
-
-from bpodacademy.exception import BpodAcademyError
 
 try:
     from bpodacademy.server import BpodAcademyServer
 except ModuleNotFoundError:
     pass
 from bpodacademy.frame import BpodFrame
+from bpodacademy.exception import BpodAcademyError
 
 
 class BpodAcademy(Tk):
@@ -162,13 +155,15 @@ class BpodAcademy(Tk):
         self.subscribe.connect(f"tcp://{self.ip}:{self.port+1}")
 
         # look for connection
-        reply = self._remote_to_server(("CONFIG", "ACADEMY"), timeout=1000, log_error=not test)
+        reply = self._remote_to_server(
+            ("CONFIG", "ACADEMY"),
+            timeout=1000,
+        )
 
         if test:
             return reply
         else:
             if not reply:
-                # self._disconnect_remote()
                 messagebox.showerror(
                     "Remote Not Connected",
                     f"Remote failed to connect to server! Please ensure the IP address and port are correct and that the server is online.",
@@ -226,6 +221,7 @@ class BpodAcademy(Tk):
         menubar = Menu(self)
 
         bpod_menu = Menu(menubar, tearoff=0)
+        bpod_menu.add_command(label="Refresh Ports", command=self._refresh_bpod_ports)
         bpod_menu.add_command(label="Add Bpod", command=self._add_box_window)
         bpod_menu.add_command(label="Remove Bpod", command=self._remove_box_window)
         bpod_menu.add_command(label="Start All Bpods", command=self._start_all_bpods)
@@ -270,10 +266,16 @@ class BpodAcademy(Tk):
 
         training_menu = Menu(menubar, tearoff=0)
         training_menu.add_command(
-            label="Save Training Configuration", command=self._save_training_config
+            label="Save Training Configuration",
+            command=self._save_training_config_window,
         )
         training_menu.add_command(
-            label="Load Training Configuration", command=self._load_training_config
+            label="Load Training Configuration",
+            command=lambda: self._select_training_config(mode="load"),
+        )
+        training_menu.add_command(
+            label="Delete Training Configuration",
+            command=lambda: self._select_training_config(mode="delete"),
         )
         menubar.add_cascade(label="Training", menu=training_menu)
 
@@ -294,6 +296,10 @@ class BpodAcademy(Tk):
             )
 
         self.protocol("WM_DELETE_WINDOW", self._close_bpod_academy)
+
+    def _refresh_bpod_ports(self):
+
+        status = self._remote_to_server(("PORTS", "REFRESH"))
 
     def _add_box(self, bpod_id, bpod_serial, position):
 
@@ -858,7 +864,10 @@ class BpodAcademy(Tk):
 
             teensy_ports = self._remote_to_server(("PORTS",))
             if teensy_ports is None:
-                BpodAcademyError("Error fetching Ports from server!")
+                raise BpodAcademyError(
+                    f"BpodAcademy: Error fetching Ports from server!"
+                )
+
             teensy_serials = [p[0] for p in teensy_ports]
 
             camera_sync_window = Toplevel(self)
@@ -931,8 +940,9 @@ class BpodAcademy(Tk):
     def _update_camera_settings(self, bpod_id, camera_settings):
 
         self.cameras[bpod_id] = camera_settings
-        bpod_index = self.cfg["bpod_ids"].index(bpod_id)
-        self.bpod_frames[bpod_index].camera_settings = camera_settings
+        if bpod_id in self.cfg["bpod_ids"]:
+            bpod_index = self.cfg["bpod_ids"].index(bpod_id)
+            self.bpod_frames[bpod_index].camera_settings = camera_settings
 
     def _delete_logs_command(self):
 
@@ -1061,7 +1071,7 @@ class BpodAcademy(Tk):
             BpodAcademy.ZMQ_SUBSCRIBE_FREQUENCY_MS, self._listen_to_server
         )
 
-    def _remote_to_server(self, msg, timeout=ZMQ_REQUEST_RCVTIMEO_MS, log_error=True):
+    def _remote_to_server(self, msg, timeout=ZMQ_REQUEST_RCVTIMEO_MS):
 
         if self.request is not None:
 
@@ -1071,10 +1081,6 @@ class BpodAcademy(Tk):
             try:
                 reply = self.request.recv_pyobj()
             except zmq.Again:
-                if log_error:
-                    logging.error(
-                        f"BpodAcademy: server time out while waiting for reply from message = {msg}"
-                    )
                 reply = None
 
             return reply
@@ -1166,15 +1172,37 @@ class BpodAcademy(Tk):
 
                 return 0
 
-    def _save_training_config(self):
+    def _save_training_config_window(self):
 
-        config_file_name = simpledialog.askstring(
-            "Training Config File",
-            "Please enter a name for the new training config file:",
-            parent=self,
-        )
+        save_config_window = Toplevel(self)
+        save_config_window.title("Training Config File")
+        Label(
+            save_config_window,
+            text="Please enter a name for the new training config file:",
+        ).grid(sticky="w", row=0, column=0, rowspan=2)
+        config_file_name = StringVar(save_config_window)
 
-        if config_file_name is not None:
+        existing_configs = self._remote_to_server(("CONFIG", "TRAINING", "FETCH"))
+        Combobox(
+            save_config_window, textvariable=config_file_name, values=existing_configs
+        ).grid(sticky="nsew", row=0, column=1)
+        Button(
+            save_config_window,
+            text="Ok",
+            command=lambda: self._save_training_config(
+                config_file_name.get(), save_config_window
+            ),
+        ).grid(sticky="nsew", row=2, column=1)
+        Button(
+            save_config_window, text="Cancel", command=save_config_window.destroy
+        ).grid(sticky="nsew", row=3, column=1)
+
+    def _save_training_config(self, config_file_name, window=None):
+
+        if window is not None:
+            window.destroy()
+
+        if config_file_name:
 
             bpod_ids = []
             protocols = []
@@ -1199,7 +1227,7 @@ class BpodAcademy(Tk):
                 )
             )
 
-    def _load_training_config(self):
+    def _select_training_config(self, mode="load"):
 
         training_configs = self._remote_to_server(("CONFIG", "TRAINING", "FETCH"))
 
@@ -1217,12 +1245,20 @@ class BpodAcademy(Tk):
                 values=training_configs,
                 state="readonly",
             ).grid(sticky="nsew", row=0, column=1)
+
+            if mode == "load":
+                cmd = lambda: self._set_training_config(
+                    selected_file.get(), choose_training_config_window
+                )
+            elif mode == "delete":
+                cmd = lambda: self._delete_training_config(
+                    selected_file.get(), choose_training_config_window
+                )
+
             Button(
                 choose_training_config_window,
                 text="Submit",
-                command=lambda: self._set_training_config(
-                    selected_file.get(), choose_training_config_window
-                ),
+                command=cmd,
             ).grid(sticky="nsew", row=1, column=1)
             Button(
                 choose_training_config_window,
@@ -1230,9 +1266,18 @@ class BpodAcademy(Tk):
                 command=choose_training_config_window.destroy,
             ).grid(sticky="nsew", row=2, column=1)
 
-    def _set_training_config(self, training_config_file, window):
+        else:
 
-        window.destroy()
+            messagebox.showwarning(
+                "No training configurations!",
+                "Could not find any saved training configurations.",
+                parent=self,
+            )
+
+    def _set_training_config(self, training_config_file, window=None):
+
+        if window is not None:
+            window.destroy()
 
         if training_config_file:
             training_config = self._remote_to_server(
@@ -1251,6 +1296,26 @@ class BpodAcademy(Tk):
             else:
 
                 messagebox.showerror("Server did not return training config.")
+
+    def _delete_training_config(self, training_config_file, window=None):
+
+        if window is not None:
+            window.destroy()
+
+        if training_config_file:
+
+            status = self._remote_to_server(
+                ("CONFIG", "TRAINING", "DELETE", training_config_file)
+            )
+
+            if status[:3] == ("CONFIG", "TRAINING", "DELETE"):
+
+                if not status[3]:
+
+                    messagebox.showerror(
+                        "Failed to delete file!",
+                        f"Failed to delete the training configuration file = {training_config_file}",
+                    )
 
 
 def main():
