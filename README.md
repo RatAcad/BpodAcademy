@@ -14,6 +14,7 @@ BpodAcademy saves your system configuration (device names and serial numbers) in
 
 - Matlab w/ Bpod software ([gkane26/Bpod_Gen2](https://github.com/RatAcad/Bpod_Gen2_Legacy))
   - Only tested Matlab R2020a, but should work with Matlab > R2014b
+  - Remember to change the folder name from Bpod_Gen2_Legacy to Bpod_Gen2
 - Python 3: Perferably using [Anaconda](https://www.anaconda.com/products/individual) or a virtual environment
 
 ### Installation (terminal commands)
