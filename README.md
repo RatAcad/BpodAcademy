@@ -12,7 +12,7 @@ BpodAcademy saves your system configuration (device names and serial numbers) in
 
 ### Requirements
 
-- Matlab w/ Bpod software ([gkane26/Bpod_Gen2](http://github.com/gkane26/Bpod_Gen2))
+- Matlab w/ Bpod software ([gkane26/Bpod_Gen2](https://github.com/RatAcad/Bpod_Gen2_Legacy))
   - Only tested Matlab R2020a, but should work with Matlab > R2014b
 - Python 3: Perferably using [Anaconda](https://www.anaconda.com/products/individual) or a virtual environment
 
@@ -101,6 +101,6 @@ The protocol, subject, and settings file menus are populated similar to how they
 
 ### TODO
 
-- [ ] Test BpodAcademy and [gkane26/Bpod_Gen2](http://github.com/gkane26/Bpod_Gen2) on Windows and Linux
+- [ ] Test BpodAcademy and [gkane26/Bpod_Gen2](https://github.com/RatAcad/Bpod_Gen2_Legacy) on Windows and Linux
 - [ ] Support vectors and matrices when creating new settings files
 - [ ] Log output from MATLAB Bpod protocols
