@@ -33,15 +33,19 @@ class BpodFrame(tk.Frame):
     ):
 
         tk.Frame.__init__(self, parent)
-
+        print(status)
         self.bpod_id = bpod_id
         self.serial_number = tk.StringVar(self, value=serial_number)
         self.status = status[0] if status is not None else 0
         if self.status == 2:
-            self.protocol_details = (status[1], status[2], status[3])
-            self.check_protocol = self.after(
-                BpodFrame.CHECK_PROTOCOL_MS, self._check_running_protocol
-            )
+            print(status)
+            try:
+                self.protocol_details = (status[1], status[2], status[3])
+                self.check_protocol = self.after(
+                    BpodFrame.CHECK_PROTOCOL_MS, self._check_running_protocol
+                )
+            except:
+                self.protocol_details = (None, None, None)
         else:
             self.protocol_details = (None, None, None)
         self.camera_settings = camera_settings
